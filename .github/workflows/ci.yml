@@ -106,3 +106,23 @@ jobs:
     # Offline: a fake chain and fixed prices. No test reaches Arc or Pyth.
     - name: Run service tests
       run: pytest guard/service/tests -q
+
+  proof:
+    name: Proof (Python)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install with test dependencies
+      run: pip install -e "proof[test]"
+
+    # Offline: a recorded Hyperliquid response and hand-built series.
+    - name: Run tests
+      run: pytest proof/tests -q
