@@ -379,4 +379,71 @@ contract HyperionGuardTest is Test {
         vm.expectRevert(GuardedExecutor.WrongOrder.selector);
         exec.execute(address(venue), abi.encodeCall(MockVenue.trade, (triedAmt)), notional, v, sig);
     }
+
+    // ── calldata notional decoder tests ─────────────────────────────────────
+
+    function test_calldataNotionalDecoder_demoVenue() public view {
+        // Place order: 0.01 BTC (1_000_000 in 1e8) at $65,000 (65_000e8 in 1e8)
+        bytes memory data = abi.encodeWithSelector(
+            bytes4(keccak256("placeOrder(bytes32,bool,uint256,uint256)")),
+            bytes32("BTC-USD"),
+            true,
+            uint256(1_000_000),      // 0.01 BTC
+            uint256(65_000e8)        // $65,000 / BTC
+        );
+        // (1e6 * 65_000e8) / 1e10 = 650_000_000 micro-USDC ($650.00)
+        uint256 decoded = exec.decodeCalldataNotional(data);
+        assertEq(decoded, 650_000_000);
+    }
+
+    function test_calldataNotionalDecoder_underreportedNotionalReverts() public {
+        bytes memory data = abi.encodeWithSelector(
+            bytes4(keccak256("placeOrder(bytes32,bool,uint256,uint256)")),
+            bytes32("BTC-USD"),
+            true,
+            uint256(1_000_000),      // 0.01 BTC
+            uint256(65_000e8)        // $65,000 -> 650_000_000 notional
+        );
+        uint256 declaredNotional = 100_000_000; // Agent lies: declares $100 instead of $650
+
+        (HyperionGuard.Verdict memory v, bytes memory sig) = approvedFor(data, declaredNotional);
+        vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                GuardedExecutor.NotionalUnderreported.selector,
+                uint256(650_000_000),
+                uint256(100_000_000)
+            )
+        );
+        exec.execute(address(venue), data, declaredNotional, v, sig);
+    }
+
+    function test_calldataNotionalDecoder_uniswapV3AndV2() public view {
+        // Uniswap V3 exactInputSingle
+        bytes memory v3Data = abi.encodeWithSelector(
+            0x414bacae,
+            address(0x1),
+            address(0x2),
+            uint24(3000),
+            address(0x3),
+            uint256(5_000e6),        // amountIn: $5,000 USDC
+            uint256(1e18),
+            uint160(0)
+        );
+        assertEq(exec.decodeCalldataNotional(v3Data), 5_000e6);
+
+        // Uniswap V2 swapExactTokensForTokens
+        address[] memory path = new address[](2);
+        path[0] = address(0x1);
+        path[1] = address(0x2);
+        bytes memory v2Data = abi.encodeWithSelector(
+            0x38ed1739,
+            uint256(2_500e6),        // amountIn: $2,500 USDC
+            uint256(1e18),
+            path,
+            address(0x3),
+            uint256(block.timestamp + 1000)
+        );
+        assertEq(exec.decodeCalldataNotional(v2Data), 2_500e6);
+    }
 }
