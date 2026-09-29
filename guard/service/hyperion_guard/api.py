@@ -15,6 +15,7 @@ and everything else passes through free, so anyone can audit a verdict.
 
 from __future__ import annotations
 
+import base64
 import re
 from typing import Annotated
 
@@ -22,6 +23,7 @@ from eth_account import Account
 from fastapi import Body, FastAPI, HTTPException
 
 from .engine import ExecutorCall, Guard, GuardUnavailable, parse_order
+from .solana import SolanaAgentPolicy, SolanaGuardEngine, b58decode
 
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 HEX = re.compile(r"^0x([0-9a-fA-F]{2})*$")
@@ -33,18 +35,29 @@ def _address(value: str, name: str) -> str:
     return value
 
 
-def create_app(guard: Guard) -> FastAPI:
+def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | None = None) -> FastAPI:
     app = FastAPI(title="Hyperion Guard", version="1",
-                  description="Pre-trade risk checks for autonomous trading agents, with the kill switch on Arc.")
-    signer = Account.from_key(guard.signer_key).address
+                  description="Pre-trade risk checks for autonomous trading agents, with multi-chain protection (Arc EVM + Solana).")
+    signer = Account.from_key(guard.signer_key).address if guard else None
+    if solana_guard is None:
+        solana_guard = SolanaGuardEngine()
 
     @app.get("/v1/health")
     def health():
-        return {"ok": True, "signer": signer, "contract": guard.domain.contract, "chain_id": guard.domain.chain_id,
-                "verdict_ttl_s": guard.ttl}
+        res = {"ok": True, "solana_cosigner": solana_guard.pubkey_b58}
+        if guard:
+            res.update({
+                "signer": signer,
+                "contract": guard.domain.contract,
+                "chain_id": guard.domain.chain_id,
+                "verdict_ttl_s": guard.ttl,
+            })
+        return res
 
     @app.post("/v1/check")
     def check(body: Annotated[dict, Body()]):
+        if guard is None:
+            raise HTTPException(503, "EVM guard service is not enabled")
         agent = _address(body.get("agent"), "agent")
         try:
             order = parse_order(body.get("order") or {})
@@ -92,5 +105,107 @@ def create_app(guard: Guard) -> FastAPI:
         if row is None:
             raise HTTPException(404, "no such verdict")
         return {"verdict": row, "anchor": guard.ledger.proof_for(seq)}
+
+    # =========================================================================
+    # Solana Endpoints
+    # =========================================================================
+
+    @app.get("/v1/solana/health")
+    def solana_health():
+        return {"ok": True, "cosigner_pubkey": solana_guard.pubkey_b58}
+
+    @app.post("/v1/solana/policy")
+    def set_solana_policy(body: Annotated[dict, Body()]):
+        agent_id = body.get("agent_id")
+        if not agent_id or not isinstance(agent_id, str):
+            raise HTTPException(422, "agent_id must be a non-empty string")
+        owner_pubkey = str(body.get("owner_solana_pubkey", ""))
+        max_notional = float(body.get("max_order_notional_usd", 5_000.0))
+        max_slippage = int(body.get("max_slippage_bps", 100))
+        allowed = body.get("allowed_programs")
+        policy = SolanaAgentPolicy(
+            agent_id=agent_id,
+            owner_solana_pubkey=owner_pubkey,
+            max_order_notional_usd=max_notional,
+            max_slippage_bps=max_slippage,
+            allowed_programs=set(allowed) if allowed else None,
+        )
+        solana_guard.set_policy(policy)
+        return {
+            "ok": True,
+            "agent_id": agent_id,
+            "policy": {
+                "owner_solana_pubkey": policy.owner_solana_pubkey,
+                "max_order_notional_usd": policy.max_order_notional_usd,
+                "max_slippage_bps": policy.max_slippage_bps,
+                "allowed_programs": sorted(list(policy.allowed_programs)),
+            },
+        }
+
+    @app.get("/v1/solana/policy/{agent_id}")
+    def get_solana_policy(agent_id: str):
+        policy = solana_guard.get_policy(agent_id)
+        if policy is None:
+            raise HTTPException(404, f"No policy configured for Solana agent '{agent_id}'")
+        return {
+            "agent_id": agent_id,
+            "owner_solana_pubkey": policy.owner_solana_pubkey,
+            "max_order_notional_usd": policy.max_order_notional_usd,
+            "max_slippage_bps": policy.max_slippage_bps,
+            "allowed_programs": sorted(list(policy.allowed_programs)),
+            "killed": policy.is_killed,
+        }
+
+    @app.post("/v1/solana/kill")
+    def kill_solana_agent(body: Annotated[dict, Body()]):
+        agent_id = body.get("agent_id")
+        if not agent_id or not isinstance(agent_id, str):
+            raise HTTPException(422, "agent_id must be a non-empty string")
+        reason = str(body.get("reason", "Emergency kill switch triggered"))
+        solana_guard.kill_agent(agent_id, reason=reason)
+        return {"ok": True, "agent_id": agent_id, "killed": True, "reason": reason}
+
+    @app.post("/v1/solana/check")
+    def solana_check(body: Annotated[dict, Body()]):
+        agent_id = body.get("agent_id")
+        if not agent_id or not isinstance(agent_id, str):
+            raise HTTPException(422, "agent_id must be a non-empty string")
+        tx_raw = body.get("tx_bytes")
+        if not tx_raw or not isinstance(tx_raw, str):
+            raise HTTPException(422, "tx_bytes must be a non-empty string")
+
+        encoding = body.get("encoding", "").lower()
+        try:
+            if encoding == "base58":
+                raw_bytes = b58decode(tx_raw)
+            elif encoding == "hex" or tx_raw.startswith("0x"):
+                hex_str = tx_raw[2:] if tx_raw.startswith("0x") else tx_raw
+                raw_bytes = bytes.fromhex(hex_str)
+            elif encoding == "base64":
+                raw_bytes = base64.b64decode(tx_raw)
+            else:
+                if tx_raw.startswith("0x"):
+                    raw_bytes = bytes.fromhex(tx_raw[2:])
+                else:
+                    try:
+                        raw_bytes = base64.b64decode(tx_raw)
+                    except Exception:
+                        raw_bytes = b58decode(tx_raw)
+        except Exception as exc:
+            raise HTTPException(422, f"Failed to decode transaction bytes: {exc}") from None
+
+        verdict = solana_guard.evaluate_transaction(agent_id, raw_bytes)
+        return {
+            "approved": verdict.approved,
+            "status": verdict.status,
+            "violation_details": verdict.violation_details,
+            "agent_id": verdict.agent_id,
+            "recent_blockhash": verdict.recent_blockhash,
+            "evaluated_at_ns": verdict.evaluated_at_ns,
+            "instructions_count": len(verdict.decoded_operations),
+            "decoded_operations": verdict.decoded_operations,
+            "cosigner_pubkey": verdict.cosigner_pubkey,
+            "cosigner_signature_b58": verdict.cosigner_signature_b58,
+        }
 
     return app
