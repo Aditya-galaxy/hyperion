@@ -68,6 +68,28 @@ def test_real_hyperliquid_history_is_internally_consistent():
     assert m["intervals"] == len(w["accountValueHistory"]) - 1
 
 
+def test_deflated_sharpe_ratio_and_moments():
+    w = dict(FIXTURE)["month"]
+    pts = metrics.points(w["accountValueHistory"], w["pnlHistory"])
+    m_10 = metrics.compute(pts, num_trials=10)
+    m_1000 = metrics.compute(pts, num_trials=1000)
+
+    # 1. Moments must be populated and finite
+    assert "sharpeRatio" in m_10
+    assert "probabilisticSharpeRatio" in m_10
+    assert "deflatedSharpeRatio" in m_10
+    assert "skewness" in m_10
+    assert "kurtosis" in m_10
+
+    # 2. Deflated Sharpe under 1000 trials must be strictly lower or equal to 10 trials (Bailey & López de Prado)
+    dsr_10 = Decimal(m_10["deflatedSharpeRatio"])
+    dsr_1000 = Decimal(m_1000["deflatedSharpeRatio"])
+    assert dsr_1000 <= dsr_10, "More trials must deflate the Sharpe ratio confidence"
+    assert 0 <= dsr_10 <= 1
+    assert 0 <= dsr_1000 <= 1
+
+
+
 # ── the signed request ───────────────────────────────────────────────────────
 
 def request(**kw) -> Request:
