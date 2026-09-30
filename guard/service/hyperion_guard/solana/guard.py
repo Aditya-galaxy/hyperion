@@ -218,6 +218,24 @@ class SolanaGuardEngine:
                     violation_details=f"Target program '{inst.program_id}' ({inst.program_label}) is not in policy allowlist"
                 )
 
+            # Check A.1: Fail-Closed on Unparsed or Malformed Instructions
+            if inst.details.get("error") or inst.operation.startswith("UNKNOWN_"):
+                err_msg = inst.details.get("error") or f"unrecognized operation '{inst.operation}'"
+                return SolanaVerdict(
+                    approved=False,
+                    status="REJECTED_MALFORMED_INSTRUCTION",
+                    agent_id=agent_id,
+                    recent_blockhash=decoded.recent_blockhash,
+                    evaluated_at_ns=now_ns,
+                    cosigner_pubkey=self.cosigner_pubkey_b58,
+                    cosigner_signature_b58=None,
+                    decoded_operations=operations,
+                    violation_details=(
+                        f"Instruction targeting '{inst.program_label}' ({inst.program_id}) "
+                        f"could not be safely decoded: {err_msg}"
+                    ),
+                )
+
             # Check B: Maximum Slippage Collar (MEV defense)
             if inst.slippage_bps is not None and inst.slippage_bps > policy.max_slippage_bps:
                 return SolanaVerdict(

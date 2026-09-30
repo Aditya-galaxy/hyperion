@@ -104,9 +104,20 @@ def decode_jupiter_instruction(data: bytes, accounts: list[str]) -> tuple[str, i
         return "UNKNOWN_JUPITER", None, None, None, {"discriminator": discriminator, "error": f"unrecognized Jupiter discriminator {discriminator}"}
 
     try:
-        in_amount, quoted_out, slippage_bps, platform_fee_bps = struct.unpack_from("<QQHB", data, len(data) - 19)
+        val1, val2, slippage_bps, platform_fee_bps = struct.unpack_from("<QQHB", data, len(data) - 19)
     except struct.error as exc:
         return "UNKNOWN_JUPITER", None, None, None, {"discriminator": discriminator, "error": str(exc)}
+
+    if "exactOut" in route_name or "ExactOut" in route_name:
+        # In exactOutRoute / sharedAccountsExactOutRoute:
+        # trailing 19 bytes: outAmount (u64), quotedInAmount (u64), slippageBps (u16), platformFeeBps (u8)
+        in_amount = val2
+        quoted_out = val1
+    else:
+        # In route / sharedAccountsRoute / routeWithTokenLedger:
+        # trailing 19 bytes: inAmount (u64), quotedOutAmount (u64), slippageBps (u16), platformFeeBps (u8)
+        in_amount = val1
+        quoted_out = val2
 
     details: dict[str, Any] = {
         "instruction_name": route_name,

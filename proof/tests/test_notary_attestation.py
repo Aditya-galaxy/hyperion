@@ -84,12 +84,19 @@ def test_notary_tampering_payload_breaks_signature():
         timestamp_ms=1727000000000,
     )
 
-    # Malicious actor changes closed PnL from 50 to 5000
+    # 1. Tampering payload without updating commitment triggers Transcript commitment mismatch
     tampered_payload = json.loads(json.dumps(fills_data))
     tampered_payload[1]["closedPnl"] = "5000.00"
     attestation.revealed_payload = tampered_payload
 
     verifier = NotaryAttestationVerifier(trusted_notaries={NOTARY_ADDR}, max_timestamp_skew_seconds=3600 * 24 * 365)
+    with pytest.raises(NotaryVerificationError, match="Transcript commitment mismatch"):
+        verifier.verify(attestation, current_time_s=1727000000.0)
+
+    # 2. Tampering payload AND updating transcript commitment triggers Notary signature mismatch
+    from eth_utils import keccak
+    payload_bytes = json.dumps(tampered_payload, sort_keys=True, separators=(",", ":")).encode()
+    attestation.transcript_commitment = "0x" + keccak(payload_bytes).hex()
     with pytest.raises(NotaryVerificationError, match="Notary signature mismatch"):
         verifier.verify(attestation, current_time_s=1727000000.0)
 

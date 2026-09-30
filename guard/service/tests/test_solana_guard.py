@@ -206,6 +206,25 @@ def test_decode_jupiter_v6_swap():
     assert inst.slippage_bps == 50
 
 
+def test_decode_jupiter_exact_out_route():
+    # exactOutRoute discriminator: 7e2c8ea1d9a65bc6
+    disc = bytes.fromhex("7e2c8ea1d9a65bc6")
+    route_plan = b"\x01" * 15 # mock route plan steps
+    out_amount = 50_000_000 # 50 SOL (desired out)
+    quoted_in = 7_500_000_000 # 7,500 USDC (quoted in)
+    slippage_bps = 25
+    fee_bps = 0
+    fixed_tail = struct.pack("<QQHB", out_amount, quoted_in, slippage_bps, fee_bps)
+    ix_data = disc + route_plan + fixed_tail
+
+    op_type, in_amt, quoted_out, slip, details = decode_jupiter_instruction(ix_data, [])
+    assert op_type == "JUPITER_SWAP"
+    assert in_amt == quoted_in # input to spend
+    assert quoted_out == out_amount # output desired
+    assert slip == 25
+    assert details["instruction_name"] == "exactOutRoute"
+
+
 def test_decode_phoenix_limit_order():
     data = bytes([1, 0]) + struct.pack("<QQ", 1000, 500)
     tx_bytes = build_mock_solana_tx(PHOENIX_PROGRAM_ID, data)
@@ -374,6 +393,27 @@ def test_guard_kill_switch_blocks_execution_and_revival():
     verdict_after = engine.evaluate_transaction("sol-agent-1", tx_bytes)
     assert verdict_after.approved
     assert verdict_after.status == "APPROVED"
+
+
+def test_guard_rejects_malformed_or_unparsed_instruction():
+    """Firewall Fail-Closed: Unknown/malformed instruction on allowlisted program is rejected."""
+    engine = SolanaGuardEngine()
+    policy = SolanaAgentPolicy(
+        agent_id="sol-agent-1",
+        owner_solana_pubkey="7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+        require_guard_signer=True,
+    )
+    engine.set_policy(policy)
+
+    # Corrupt or unrecognized instruction data targeting Jupiter (e.g. unknown discriminator 0xdeadbeefdeadbeef)
+    bogus_ix_data = bytes.fromhex("deadbeefdeadbeef") + b"\x00" * 30
+    tx_bytes = build_mock_solana_tx(JUPITER_V6_PROGRAM_ID, bogus_ix_data, guard_pubkey_b58=engine.pubkey_b58)
+
+    verdict = engine.evaluate_transaction("sol-agent-1", tx_bytes)
+    assert not verdict.approved
+    assert verdict.status == "REJECTED_MALFORMED_INSTRUCTION"
+    assert "could not be safely decoded" in verdict.violation_details
+    assert verdict.cosigner_signature_b58 is None
 
 
 # ── 4. Authenticated Solana Policy & Kill API Tests ───────────────────────────

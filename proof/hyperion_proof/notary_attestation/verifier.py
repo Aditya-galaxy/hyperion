@@ -7,10 +7,12 @@ or ERC-8004 Reputation Registry anchoring.
 
 from __future__ import annotations
 
+import json
 import time
 
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from eth_utils import keccak
 
 from .attestation import NotaryAttestation
 
@@ -69,7 +71,16 @@ class NotaryAttestationVerifier:
                 f"Attestation has expired: age {now_s - attestation_time_s:.0f}s > {self.max_age_s}s"
             )
 
-        # 4. Cryptographic Signature Verification
+        # 4. Transcript Commitment Verification
+        payload_bytes = json.dumps(attestation.revealed_payload, sort_keys=True, separators=(",", ":")).encode()
+        expected_commitment = "0x" + keccak(payload_bytes).hex()
+        if attestation.transcript_commitment.lower() != expected_commitment.lower():
+            raise NotaryVerificationError(
+                f"Transcript commitment mismatch: declared {attestation.transcript_commitment}, "
+                f"computed {expected_commitment}"
+            )
+
+        # 5. Cryptographic Signature Verification
         digest = attestation.claims_digest()
         msg = encode_defunct(hexstr=digest)
         try:

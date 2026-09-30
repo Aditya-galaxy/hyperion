@@ -11,6 +11,8 @@ use crate::orderbook::lob::LimitOrderBook;
 pub struct OfiAlpha {
     /// Price impact coefficient (Kyle's Lambda)
     pub lambda: f64,
+    /// Baseline Kyle's Lambda for bounding dynamic updates
+    pub baseline_lambda: f64,
     /// Reference volume normalizer (typical queue size or ADV unit)
     pub ref_volume: f64,
     /// Maximum allowed quote skew in price units (safety boundary)
@@ -34,6 +36,7 @@ impl OfiAlpha {
     pub fn new(alpha_multiplier: f64, max_skew_price: f64, decay_factor: f64) -> Self {
         Self {
             lambda: alpha_multiplier,
+            baseline_lambda: alpha_multiplier,
             ref_volume: 1.0,
             max_skew_price,
             decay_factor,
@@ -57,6 +60,7 @@ impl OfiAlpha {
         let ref_vol = ref_volume.max(0.001);
         Self {
             lambda: initial_lambda,
+            baseline_lambda: initial_lambda,
             ref_volume: ref_vol,
             max_skew_price,
             decay_factor,
@@ -107,8 +111,8 @@ impl OfiAlpha {
                     if self.rolling_var > 1e-6 {
                         let empirical_lambda = self.rolling_cov / self.rolling_var;
                         // Bound lambda to positive, realistic market range [0.1x to 5.0x of baseline]
-                        let min_l = self.lambda * 0.1;
-                        let max_l = self.lambda * 5.0;
+                        let min_l = (self.baseline_lambda * 0.1).max(1e-6);
+                        let max_l = self.baseline_lambda * 5.0;
                         self.lambda = empirical_lambda.clamp(min_l, max_l);
                     }
                 }
@@ -134,8 +138,8 @@ impl OfiAlpha {
 
                 if self.rolling_var > 1e-6 {
                     let empirical_lambda = self.rolling_cov / self.rolling_var;
-                    let min_l = 1e-6;
-                    let max_l = 1.0;
+                    let min_l = (self.baseline_lambda * 0.1).max(1e-6);
+                    let max_l = self.baseline_lambda * 5.0;
                     self.lambda = empirical_lambda.clamp(min_l, max_l);
                 }
             }

@@ -63,7 +63,7 @@ Hyperion Guard acts as an institutional pre-trade co-signing firewall:
 - **Anti-MEV Slippage Collar:** Directly inspects `slippage_bps` encoded in DEX swaps, bounding maximum acceptable slippage to eliminate sandwich vulnerability.
 - **Notional Size Caps:** Binds maximum USD exposure per order and throttles runaway trading loops.
 - **Cryptographic Kill Switch:** Owner/Guardian Ed25519-signed endpoint immediately revokes an agent's trading authority without requiring on-chain transaction delays. Guardians may trip the kill switch, but only the registered owner can revive trading.
-- **Dual-Signature Multisig Enforcement:** Native Solana execution vault program (`guard/contracts_solana/`) requires both the Agent's signature and the Guard's Ed25519 co-signature to execute CPI instructions.
+- **Dual-Signature Multisig Enforcement:** Reference dual-signer execution vault specification and state machine (`guard/contracts_solana/`) enforcing both Agent signature and Guard Ed25519 co-signature for non-custodial agent risk isolation.
 
 ---
 
@@ -77,7 +77,7 @@ Hyperion Guard is built as a zero-overhead, sub-millisecond service within the H
 | **Wire Transaction Decoder** | [`guard/service/hyperion_guard/solana/decoder.py`](guard/service/hyperion_guard/solana/decoder.py) | Compact-u16 parser, legacy & V0 transaction header decoding, compiled instruction resolution, and Anchor DEX discriminator + suffix unpacking. |
 | **Pre-Trade Risk Engine** | [`guard/service/hyperion_guard/solana/guard.py`](guard/service/hyperion_guard/solana/guard.py) | Real-time policy evaluation, rate limiting, kill switch state machine, co-signer presence verification, and RFC 8032 Ed25519 message signing. |
 | **REST API Gateway** | [`guard/service/hyperion_guard/api.py`](guard/service/hyperion_guard/api.py) | High-throughput FastAPI endpoints (`/v1/solana/check`, `/v1/solana/policy`, `/v1/solana/kill`, `/v1/solana/revive`, `/v1/solana/health`). |
-| **Dual-Signer Solana Vault** | [`guard/contracts_solana/src/lib.rs`](guard/contracts_solana/src/lib.rs) | Dual-signer on-chain execution program requiring Agent + Guard signatures. |
+| **Dual-Signer Solana Vault** | [`guard/contracts_solana/src/lib.rs`](guard/contracts_solana/src/lib.rs) | Dual-signer execution vault state machine requiring Agent + Guard signatures and on-chain circuit breakers. |
 
 ### Supported Solana Protocols
 - **Jupiter V6 Aggregator:** `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4`
@@ -131,8 +131,10 @@ cd guard/service
 - `test_base58_leading_zeros`: Solana pubkey alignment preservation.
 - `test_decode_real_mainnet_jupiter_swap`: Tests against real mainnet Jupiter route instruction (`7zoC74aDKgHF...`).
 - `test_decode_jupiter_v6_swap`: Correct extraction of in-amount, min-out, and slippage BPS.
+- `test_decode_jupiter_exact_out_route`: Verified parameter unpacking on exactOutRoute Jupiter swaps.
 - `test_decode_phoenix_limit_order`: Accurate price/quantity unpacking from Phoenix byte stream.
 - `test_guard_rejects_missing_guard_signer`: Rejects transactions that do not configure Guard as a required signer.
+- `test_guard_rejects_malformed_or_unparsed_instruction`: Fail-closed firewall guarantees on unparsed instructions.
 - `test_guard_approves_safe_jupiter_swap`: Co-signs safe trades with verified Ed25519 signatures.
 - `test_guard_rejects_oversized_order_cap`: Intercepts orders exceeding notional limits.
 - `test_guard_rejects_excessive_slippage_mev_risk`: Enforces anti-sandwich slippage collars.
@@ -142,10 +144,10 @@ cd guard/service
 
 **Total Project Tests Passing:**
 - 15 Rust High-Performance Quant Engine Tests (`cargo test`)
-- 5 Solana On-Chain Dual-Signer Execution Vault Tests (`cargo test --manifest-path guard/contracts_solana/Cargo.toml`)
+- 5 Solana Execution Vault State Machine Tests (`cargo test --manifest-path guard/contracts_solana/Cargo.toml`)
 - 26 EVM Guard & Calldata Decoder Tests (`forge test`)
-- 72 Python Guard, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`)
-- **Total: 118 Automated Tests (100% Pass Rate)**
+- 74 Python Guard, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`)
+- **Total: 120 Automated Tests (100% Pass Rate)**
 
 ### Jito MEV & Sandwich Attack Simulation Benchmarks
 

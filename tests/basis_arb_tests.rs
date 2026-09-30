@@ -32,6 +32,7 @@ fn test_basis_arbitrage_yield_and_signals() {
     // Scenario 3: Negative funding (Perp trading at deep discount, shorts pay longs)
     let perp_discount = Price::from_f64(59_900.0);
     let negative_funding = -0.0008; // -87.6% APR
-    let (sig_rev, _) = engine.evaluate(spot, perp_discount, negative_funding);
+    let (sig_rev, summary_rev) = engine.evaluate(spot, perp_discount, negative_funding);
     assert_eq!(sig_rev, BasisSignal::OpenReverseBasis);
+    assert!(summary_rev.net_carry_yield_apr > 0.50, "Reverse basis must yield positive net carry from negative funding");
 }

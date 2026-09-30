@@ -75,7 +75,34 @@ impl BasisArbEngine {
         // Crypto perps pay funding every 8 hours -> 3 payments per day -> 1095 payments/year
         let payments_per_year = (24.0 / self.config.funding_period_hours) * 365.0;
         let annualized_funding = funding_rate * payments_per_year;
-        let net_carry_apr = annualized_funding - self.config.financing_cost_apr;
+
+        // In long basis (Long Spot + Short Perp), trader receives annualized_funding and pays financing_cost_apr.
+        // In reverse basis (Short Spot + Long Perp), trader receives (-annualized_funding) and pays short borrow cost.
+        let (signal, net_carry_apr) = if annualized_funding >= 0.0 {
+            let long_net_carry = annualized_funding - self.config.financing_cost_apr;
+            let sig = if long_net_carry >= self.config.min_apr_hurdle
+                && basis_pct >= self.config.min_basis_bps
+            {
+                BasisSignal::OpenLongBasis
+            } else if long_net_carry.abs() < 0.01 {
+                BasisSignal::UnwindBasis
+            } else {
+                BasisSignal::NoOpportunity
+            };
+            (sig, long_net_carry)
+        } else {
+            let reverse_net_carry = -annualized_funding - self.config.financing_cost_apr;
+            let sig = if reverse_net_carry >= self.config.min_apr_hurdle
+                && basis_pct <= -self.config.min_basis_bps
+            {
+                BasisSignal::OpenReverseBasis
+            } else if reverse_net_carry.abs() < 0.01 {
+                BasisSignal::UnwindBasis
+            } else {
+                BasisSignal::NoOpportunity
+            };
+            (sig, reverse_net_carry)
+        };
 
         let summary = YieldSummary {
             spot_price: spot,
@@ -85,24 +112,6 @@ impl BasisArbEngine {
             funding_rate_per_period: funding_rate,
             annualized_funding_apr: annualized_funding,
             net_carry_yield_apr: net_carry_apr,
-        };
-
-        // Determine signal
-        let signal = if net_carry_apr >= self.config.min_apr_hurdle
-            && basis_pct >= self.config.min_basis_bps
-        {
-            // Highly positive funding: Long Spot + Short Perp captures delta-neutral yield
-            BasisSignal::OpenLongBasis
-        } else if net_carry_apr <= -self.config.min_apr_hurdle
-            && basis_pct <= -self.config.min_basis_bps
-        {
-            // Heavily negative funding: Long Perp + Short Spot
-            BasisSignal::OpenReverseBasis
-        } else if net_carry_apr < 0.01 && net_carry_apr > -0.01 {
-            // Unwind when carry margin is evaporated
-            BasisSignal::UnwindBasis
-        } else {
-            BasisSignal::NoOpportunity
         };
 
         (signal, summary)
