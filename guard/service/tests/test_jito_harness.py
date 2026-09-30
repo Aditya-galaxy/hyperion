@@ -56,7 +56,7 @@ def test_guard_intercepts_jito_vulnerable_transaction():
     engine.set_policy(policy)
 
     # Build tx with 200 bps slippage
-    tx_bytes = build_jupiter_swap_tx(25_000_000_000, 160_000_000_000, 200)
+    tx_bytes = build_jupiter_swap_tx(25_000_000_000, 160_000_000_000, 200, guard_pubkey_b58=engine.pubkey_b58)
     verdict = engine.evaluate_transaction("test-agent", tx_bytes)
 
     assert not verdict.approved
@@ -64,7 +64,7 @@ def test_guard_intercepts_jito_vulnerable_transaction():
     assert verdict.cosigner_signature_b58 is None
 
     # Safe tx with 30 bps slippage
-    safe_tx_bytes = build_jupiter_swap_tx(25_000_000_000, 165_000_000_000, 30)
+    safe_tx_bytes = build_jupiter_swap_tx(25_000_000_000, 165_000_000_000, 30, guard_pubkey_b58=engine.pubkey_b58)
     safe_verdict = engine.evaluate_transaction("test-agent", safe_tx_bytes)
 
     assert safe_verdict.approved

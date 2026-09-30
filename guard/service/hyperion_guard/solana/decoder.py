@@ -71,32 +71,54 @@ def read_compact_u16(data: bytes, offset: int) -> Tuple[int, int]:
         shift += 7
     return val, idx
 
+# Published Jupiter V6 Anchor Instruction Discriminators (sha256("global:<name>")[:8])
+JUPITER_DISCRIMINATORS: Dict[str, str] = {
+    "e517cb977ae3ad2a": "route",
+    "5703feb8e7573909": "sharedAccountsRoute",
+    "34650f14745e8de8": "routeWithTokenLedger",
+    "b4476e37d9cc1af6": "sharedAccountsRouteWithTokenLedger",
+    "7e2c8ea1d9a65bc6": "exactOutRoute",
+    "41d8fa8dac726b69": "sharedAccountsExactOutRoute",
+}
+
+
 def decode_jupiter_instruction(data: bytes, accounts: List[str]) -> Tuple[str, Optional[int], Optional[int], Optional[int], Dict[str, Any]]:
-    """Decodes Jupiter V6 Aggregator instructions (e.g., route, sharedAccountsRoute)."""
-    if len(data) < 8:
-        return "UNKNOWN_JUPITER", None, None, None, {}
+    """
+    Decodes Jupiter V6 Aggregator instructions.
+
+    Jupiter V6 published IDL layout:
+      - 8 bytes: Anchor discriminator (e.g. e517cb977ae3ad2a for route, 5703feb8e7573909 for sharedAccountsRoute)
+      - Variable length: routePlan: Vec<RoutePlanStep> (precedes the fixed fields)
+      - Exactly 19 bytes at the END of the instruction:
+          - inAmount: u64 (8 bytes, little-endian)
+          - quotedOutAmount: u64 (8 bytes, little-endian)
+          - slippageBps: u16 (2 bytes, little-endian)
+          - platformFeeBps: u8 (1 byte)
+    """
+    if len(data) < 27:
+        return "UNKNOWN_JUPITER", None, None, None, {"error": "instruction too short (< 27 bytes for Jupiter route)"}
 
     discriminator = data[:8].hex()
-    details: Dict[str, Any] = {"discriminator": discriminator}
+    route_name = JUPITER_DISCRIMINATORS.get(discriminator)
+    if not route_name:
+        return "UNKNOWN_JUPITER", None, None, None, {"discriminator": discriminator, "error": f"unrecognized Jupiter discriminator {discriminator}"}
 
-    # Route / sharedAccountsRoute typically starts with inAmount (u64) and quotedOutAmount (u64) or slippage (u16)
-    in_amount = None
-    min_out = None
-    slippage_bps = None
+    try:
+        in_amount, quoted_out, slippage_bps, platform_fee_bps = struct.unpack_from("<QQHB", data, len(data) - 19)
+    except struct.error as exc:
+        return "UNKNOWN_JUPITER", None, None, None, {"discriminator": discriminator, "error": str(exc)}
 
-    if len(data) >= 24:
-        try:
-            in_amount = struct.unpack_from("<Q", data, 8)[0]
-            quoted_out = struct.unpack_from("<Q", data, 16)[0]
-            details["in_amount_raw"] = in_amount
-            details["quoted_out_raw"] = quoted_out
-            if len(data) >= 26:
-                slippage_bps = struct.unpack_from("<H", data, 24)[0]
-                details["slippage_bps"] = slippage_bps
-        except struct.error:
-            pass
+    details: Dict[str, Any] = {
+        "instruction_name": route_name,
+        "discriminator": discriminator,
+        "in_amount_raw": in_amount,
+        "quoted_out_raw": quoted_out,
+        "slippage_bps": slippage_bps,
+        "platform_fee_bps": platform_fee_bps,
+        "route_plan_bytes_len": len(data) - 27,
+    }
 
-    return "JUPITER_SWAP", in_amount, min_out, slippage_bps, details
+    return "JUPITER_SWAP", in_amount, quoted_out, slippage_bps, details
 
 def decode_phoenix_instruction(data: bytes, accounts: List[str]) -> Tuple[str, Optional[int], Optional[int], Optional[int], Dict[str, Any]]:
     """Decodes Phoenix Limit Order Book instructions."""

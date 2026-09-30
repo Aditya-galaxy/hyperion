@@ -33,11 +33,14 @@ from .decoder import (
 class SolanaAgentPolicy:
     agent_id: str
     owner_solana_pubkey: str
+    guardian_solana_pubkey: str = ""
     max_order_notional_usd: float = 5_000.0
     daily_notional_cap_usd: float = 50_000.0
     max_slippage_bps: int = 150 # 1.5% max allowable slippage
     max_orders_per_minute: int = 30
     is_killed: bool = False
+    policy_version: int = 1
+    require_guard_signer: bool = True # Forces Guard to be a required signer in tx
     allowed_programs: List[str] = field(default_factory=lambda: list(ALLOWLISTED_PROGRAMS.keys()))
 
 @dataclass
@@ -155,7 +158,32 @@ class SolanaGuardEngine:
                 violation_details=f"Failed to decode Solana wire transaction: {str(e)}"
             )
 
-        # 3. Frequency Rate Limiting
+        # 3. Guard Signer Requirement (Forces Guard co-signature to matter!)
+        if policy.require_guard_signer:
+            guard_idx = None
+            try:
+                guard_idx = decoded.account_keys.index(self.cosigner_pubkey_b58)
+            except ValueError:
+                pass
+
+            if guard_idx is None or guard_idx >= decoded.num_required_signatures:
+                return SolanaVerdict(
+                    approved=False,
+                    status="REJECTED_MISSING_GUARD_SIGNER",
+                    agent_id=agent_id,
+                    recent_blockhash=decoded.recent_blockhash,
+                    evaluated_at_ns=now_ns,
+                    cosigner_pubkey=self.cosigner_pubkey_b58,
+                    cosigner_signature_b58=None,
+                    decoded_operations=[],
+                    violation_details=(
+                        f"Transaction does not configure Hyperion Guard ({self.cosigner_pubkey_b58}) "
+                        f"as a required signer. Found index: {guard_idx}, "
+                        f"required signers count: {decoded.num_required_signatures}."
+                    ),
+                )
+
+        # 4. Frequency Rate Limiting
         recent_orders = [t for t in self.order_timestamps.get(agent_id, []) if now_sec - t <= 60.0]
         if len(recent_orders) >= policy.max_orders_per_minute:
             return SolanaVerdict(

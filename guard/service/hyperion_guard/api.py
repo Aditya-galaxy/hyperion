@@ -110,6 +110,19 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
     # Solana Endpoints
     # =========================================================================
 
+    from Crypto.Signature import eddsa
+
+    def _verify_ed25519_sig(pubkey_b58: str, message: bytes, signature_b58: str) -> bool:
+        try:
+            raw_pub = b58decode(pubkey_b58)
+            raw_sig = b58decode(signature_b58)
+            key = eddsa.import_public_key(raw_pub)
+            verifier = eddsa.new(key, "rfc8032")
+            verifier.verify(message, raw_sig)
+            return True
+        except Exception:
+            return False
+
     @app.get("/v1/solana/health")
     def solana_health():
         return {"ok": True, "cosigner_pubkey": solana_guard.pubkey_b58}
@@ -120,14 +133,42 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         if not agent_id or not isinstance(agent_id, str):
             raise HTTPException(422, "agent_id must be a non-empty string")
         owner_pubkey = str(body.get("owner_solana_pubkey", ""))
+        if not owner_pubkey:
+            raise HTTPException(422, "owner_solana_pubkey is required")
+
+        guardian_pubkey = str(body.get("guardian_solana_pubkey", ""))
         max_notional = float(body.get("max_order_notional_usd", 5_000.0))
         max_slippage = int(body.get("max_slippage_bps", 100))
+        policy_version = int(body.get("policy_version", 1))
+        nonce = int(body.get("nonce", 0))
+        require_guard = bool(body.get("require_guard_signer", True))
         allowed = body.get("allowed_programs")
+
+        # Owner Ed25519 Signature Verification
+        owner_sig = body.get("signature_b58")
+        if not owner_sig:
+            raise HTTPException(401, "Missing owner Ed25519 signature (signature_b58)")
+
+        msg = f"hyperion-guard/solana/policy/v1:{agent_id}:{owner_pubkey}:{max_notional:.2f}:{max_slippage}:{nonce}:{policy_version}".encode()
+        if not _verify_ed25519_sig(owner_pubkey, msg, owner_sig):
+            raise HTTPException(401, "Invalid owner signature for policy update")
+
+        # Check existing policy ownership & monotonic version bump
+        existing = solana_guard.get_policy(agent_id)
+        if existing is not None and existing.owner_solana_pubkey:
+            if existing.owner_solana_pubkey != owner_pubkey:
+                raise HTTPException(403, "Forbidden: Only the registered owner can modify an existing policy")
+            if policy_version <= existing.policy_version:
+                raise HTTPException(409, f"policy_version {policy_version} must be strictly greater than current version {existing.policy_version}")
+
         policy = SolanaAgentPolicy(
             agent_id=agent_id,
             owner_solana_pubkey=owner_pubkey,
+            guardian_solana_pubkey=guardian_pubkey,
             max_order_notional_usd=max_notional,
             max_slippage_bps=max_slippage,
+            policy_version=policy_version,
+            require_guard_signer=require_guard,
             allowed_programs=set(allowed) if allowed else None,
         )
         solana_guard.set_policy(policy)
@@ -136,8 +177,11 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
             "agent_id": agent_id,
             "policy": {
                 "owner_solana_pubkey": policy.owner_solana_pubkey,
+                "guardian_solana_pubkey": policy.guardian_solana_pubkey,
                 "max_order_notional_usd": policy.max_order_notional_usd,
                 "max_slippage_bps": policy.max_slippage_bps,
+                "policy_version": policy.policy_version,
+                "require_guard_signer": policy.require_guard_signer,
                 "allowed_programs": sorted(list(policy.allowed_programs)),
             },
         }
@@ -150,8 +194,11 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         return {
             "agent_id": agent_id,
             "owner_solana_pubkey": policy.owner_solana_pubkey,
+            "guardian_solana_pubkey": policy.guardian_solana_pubkey,
             "max_order_notional_usd": policy.max_order_notional_usd,
             "max_slippage_bps": policy.max_slippage_bps,
+            "policy_version": policy.policy_version,
+            "require_guard_signer": policy.require_guard_signer,
             "allowed_programs": sorted(list(policy.allowed_programs)),
             "killed": policy.is_killed,
         }
@@ -161,9 +208,58 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         agent_id = body.get("agent_id")
         if not agent_id or not isinstance(agent_id, str):
             raise HTTPException(422, "agent_id must be a non-empty string")
+
+        policy = solana_guard.get_policy(agent_id)
+        if policy is None:
+            raise HTTPException(404, f"No policy configured for Solana agent '{agent_id}'")
+
+        caller_pubkey = str(body.get("caller_pubkey", ""))
+        nonce = int(body.get("nonce", 0))
+        sig_b58 = body.get("signature_b58")
+        if not caller_pubkey or not sig_b58:
+            raise HTTPException(401, "caller_pubkey and signature_b58 are required to trip kill switch")
+
+        msg = f"hyperion-guard/solana/kill/v1:{agent_id}:{nonce}".encode()
+        if not _verify_ed25519_sig(caller_pubkey, msg, sig_b58):
+            raise HTTPException(401, "Invalid signature for kill switch invocation")
+
+        authorized_callers = {policy.owner_solana_pubkey}
+        if policy.guardian_solana_pubkey:
+            authorized_callers.add(policy.guardian_solana_pubkey)
+
+        if caller_pubkey not in authorized_callers:
+            raise HTTPException(403, "Forbidden: Caller is neither owner nor guardian")
+
         reason = str(body.get("reason", "Emergency kill switch triggered"))
         solana_guard.kill_agent(agent_id, reason=reason)
         return {"ok": True, "agent_id": agent_id, "killed": True, "reason": reason}
+
+    @app.post("/v1/solana/revive")
+    def revive_solana_agent(body: Annotated[dict, Body()]):
+        agent_id = body.get("agent_id")
+        if not agent_id or not isinstance(agent_id, str):
+            raise HTTPException(422, "agent_id must be a non-empty string")
+
+        policy = solana_guard.get_policy(agent_id)
+        if policy is None:
+            raise HTTPException(404, f"No policy configured for Solana agent '{agent_id}'")
+
+        caller_pubkey = str(body.get("caller_pubkey", ""))
+        nonce = int(body.get("nonce", 0))
+        sig_b58 = body.get("signature_b58")
+        if not caller_pubkey or not sig_b58:
+            raise HTTPException(401, "caller_pubkey and signature_b58 are required to revive agent")
+
+        msg = f"hyperion-guard/solana/revive/v1:{agent_id}:{nonce}".encode()
+        if not _verify_ed25519_sig(caller_pubkey, msg, sig_b58):
+            raise HTTPException(401, "Invalid signature for agent revival")
+
+        # ONLY the owner can revive! (Guardian or agent CANNOT revive)
+        if caller_pubkey != policy.owner_solana_pubkey:
+            raise HTTPException(403, "Forbidden: Guardian cannot revive, only the registered owner can revive an agent")
+
+        solana_guard.revive_agent(agent_id)
+        return {"ok": True, "agent_id": agent_id, "killed": False}
 
     @app.post("/v1/solana/check")
     def solana_check(body: Annotated[dict, Body()]):

@@ -13,6 +13,8 @@ from .decoder import (
     RAYDIUM_V4_PROGRAM_ID,
     SPL_TOKEN_PROGRAM_ID,
     SYSTEM_PROGRAM_ID,
+    JUPITER_DISCRIMINATORS,
+    decode_jupiter_instruction,
 )
 from .guard import (
     SolanaAgentPolicy,
@@ -28,6 +30,8 @@ __all__ = [
     "DecodedSolanaTransaction",
     "decode_solana_transaction",
     "JUPITER_V6_PROGRAM_ID",
+    "JUPITER_DISCRIMINATORS",
+    "decode_jupiter_instruction",
     "PHOENIX_PROGRAM_ID",
     "RAYDIUM_V4_PROGRAM_ID",
     "SPL_TOKEN_PROGRAM_ID",

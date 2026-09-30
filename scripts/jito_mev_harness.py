@@ -244,6 +244,7 @@ def build_jupiter_swap_tx(
     min_out_units: int,
     slippage_bps: int,
     agent_pubkey_b58: str = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    guard_pubkey_b58: Optional[str] = None,
 ) -> bytes:
     """Builds a binary-compatible Solana wire transaction containing a Jupiter V6 swap."""
     agent_pubkey = b58decode(agent_pubkey_b58)
@@ -252,24 +253,47 @@ def build_jupiter_swap_tx(
 
     # Jupiter V6 Anchor discriminator (sharedAccountsRoute / route)
     disc = bytes.fromhex("e517cb977ae3ad2a")
-    ix_data = disc + struct.pack("<QQH", in_amount_units, min_out_units, slippage_bps)
+    # Variable-length route plan precedes the 19-byte fixed suffix (<QQHB)
+    mock_route_plan = b"\x01\x00\x00\x00\x01\x02\x03\x04"
+    ix_data = disc + mock_route_plan + struct.pack("<QQHB", in_amount_units, min_out_units, slippage_bps, 0)
 
-    raw = bytearray([1])  # 1 signature slot
-    raw.extend(b"\x00" * 64)
+    if guard_pubkey_b58:
+        guard_pubkey = b58decode(guard_pubkey_b58)
+        raw = bytearray([2])  # 2 signature slots
+        raw.extend(b"\x00" * 128)
 
-    # Message header: 1 required signer, 0 readonly signed, 1 readonly unsigned
-    msg = bytearray([1, 0, 1])
-    # 2 accounts: [Agent, JupiterProgram]
-    msg.append(2)
-    msg.extend(agent_pubkey)
-    msg.extend(prog_pubkey)
-    # Blockhash
-    msg.extend(blockhash)
-    # 1 Instruction: program index 1, 1 account (index 0), followed by data
-    msg.append(1)
-    msg.append(1)
-    msg.append(1)
-    msg.append(0)
+        # Message header: 2 required signers, 0 readonly signed, 1 readonly unsigned
+        msg = bytearray([2, 0, 1])
+        # 3 accounts: [Agent, Guard, JupiterProgram]
+        msg.append(3)
+        msg.extend(agent_pubkey)
+        msg.extend(guard_pubkey)
+        msg.extend(prog_pubkey)
+        msg.extend(blockhash)
+
+        # 1 Instruction: program index 2, 1 account (index 0), followed by data
+        msg.append(1)
+        msg.append(2)  # program index 2
+        msg.append(1)
+        msg.append(0)
+    else:
+        raw = bytearray([1])  # 1 signature slot
+        raw.extend(b"\x00" * 64)
+
+        # Message header: 1 required signer, 0 readonly signed, 1 readonly unsigned
+        msg = bytearray([1, 0, 1])
+        # 2 accounts: [Agent, JupiterProgram]
+        msg.append(2)
+        msg.extend(agent_pubkey)
+        msg.extend(prog_pubkey)
+        msg.extend(blockhash)
+
+        # 1 Instruction: program index 1, 1 account (index 0), followed by data
+        msg.append(1)
+        msg.append(1)  # program index 1
+        msg.append(1)
+        msg.append(0)
+
     # compact-u16 len of instruction data
     data_len = len(ix_data)
     if data_len < 128:
@@ -351,7 +375,9 @@ def run_simulation():
     est_sol_out = agent_order_size_usdc / pool.spot_price
     min_out_units = int((est_sol_out * (1.0 - loose_slippage_bps / 10_000.0)) * 1_000_000_000)
 
-    raw_tx_bytes = build_jupiter_swap_tx(in_units, min_out_units, loose_slippage_bps)
+    raw_tx_bytes = build_jupiter_swap_tx(
+        in_units, min_out_units, loose_slippage_bps, guard_pubkey_b58=engine.pubkey_b58
+    )
 
     t0 = time.perf_counter_ns()
     verdict_b = engine.evaluate_transaction("agent-quant-sol-1", raw_tx_bytes)
@@ -375,7 +401,9 @@ def run_simulation():
     print(f"   Agent re-submits with Hyperion Slippage Collar: {collared_slippage_bps} bps ({collared_slippage_bps/100:.2f}%)")
 
     min_out_collared = int((est_sol_out * (1.0 - collared_slippage_bps / 10_000.0)) * 1_000_000_000)
-    safe_tx_bytes = build_jupiter_swap_tx(in_units, min_out_collared, collared_slippage_bps)
+    safe_tx_bytes = build_jupiter_swap_tx(
+        in_units, min_out_collared, collared_slippage_bps, guard_pubkey_b58=engine.pubkey_b58
+    )
 
     t0 = time.perf_counter_ns()
     verdict_c = engine.evaluate_transaction("agent-quant-sol-1", safe_tx_bytes)
