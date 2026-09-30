@@ -30,13 +30,11 @@ Key Scenarios Evaluated:
 
 from __future__ import annotations
 
-import math
 import struct
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
 
 # Ensure guard/service is in sys.path
 SERVICE_DIR = Path(__file__).resolve().parents[1] / "guard" / "service"
@@ -44,12 +42,10 @@ if str(SERVICE_DIR) not in sys.path:
     sys.path.insert(0, str(SERVICE_DIR))
 
 from hyperion_guard.solana import (
-    b58decode,
-    b58encode,
-    decode_solana_transaction,
     JUPITER_V6_PROGRAM_ID,
     SolanaAgentPolicy,
     SolanaGuardEngine,
+    b58decode,
 )
 
 # Standard Jito Tip Accounts on Solana Mainnet
@@ -244,7 +240,7 @@ def build_jupiter_swap_tx(
     min_out_units: int,
     slippage_bps: int,
     agent_pubkey_b58: str = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-    guard_pubkey_b58: Optional[str] = None,
+    guard_pubkey_b58: str | None = None,
 ) -> bytes:
     """Builds a binary-compatible Solana wire transaction containing a Jupiter V6 swap."""
     agent_pubkey = b58decode(agent_pubkey_b58)
@@ -347,7 +343,7 @@ def run_simulation():
         print(f"   ├─ [Tx 2 Victim]:    Agent executes ${agent_order_size_usdc:,.2f} USDC swap at worst acceptable price")
         print(f"   │                   Expected SOL: {res_a.victim_sol_out_normal:.4f} SOL | Actual Received: {BOLD}{res_a.victim_sol_out_sandwiched:.4f} SOL{RESET}")
         print(f"   ├─ [Tx 3 Back-run]:  Searcher dumps {res_a.frontrun_sol_out:.2f} SOL → receives ${res_a.backrun_usdc_out:,.2f} USDC")
-        print(f"   │")
+        print("   │")
         print(f"   ├─ {BOLD}Searcher Gross Extract:{RESET} {GREEN}+${res_a.searcher_gross_profit_usdc:,.2f} USDC{RESET}")
         print(f"   ├─ {BOLD}Jito Validator Tip:{RESET}     {CYAN}${res_a.jito_validator_tip_usdc:,.2f} USDC (75% to Jito Tip Account){RESET}")
         print(f"   ├─ {BOLD}Searcher Net Retained:{RESET}  {GREEN}+${res_a.searcher_net_profit_usdc:,.2f} USDC{RESET}")
@@ -390,7 +386,7 @@ def run_simulation():
     print(f"   Violation Details:        {YELLOW}{verdict_b.violation_details}{RESET}")
     print(f"   Ed25519 Co-Signature:     {RED}WITHHELD (Signature = None){RESET}")
     print(f"\n   {BOLD}{GREEN}🛡️ RESULT: TRANSACTION BLOCKED PRE-TRADE!{RESET}")
-    print(f"   ├─ Transaction never hits Solana validators / Jito mempool")
+    print("   ├─ Transaction never hits Solana validators / Jito mempool")
     print(f"   ├─ Jito Sandwich Attack Attempt: {BOLD}{RED}FAILED (Zero victim tx to bundle){RESET}")
     print(f"   └─ {BOLD}{GREEN}CAPITAL SAVED FOR AGENT:{RESET}    {BOLD}{GREEN}+${res_a.victim_loss_usdc:,.2f} USDC (100% Protected){RESET}")
 
@@ -414,10 +410,10 @@ def run_simulation():
 
     # Test if searcher can profitably sandwich this 25 bps transaction
     res_c = jito.simulate_sandwich(pool, agent_order_size_usdc, collared_slippage_bps)
-    print(f"\n   Searcher Sandwich Feasibility on Collared Trade:")
+    print("\n   Searcher Sandwich Feasibility on Collared Trade:")
     if not res_c.is_profitable:
         print(f"   ├─ Optimal Front-run Profit: {RED}${res_c.searcher_gross_profit_usdc:.2f} USDC{RESET}")
-        print(f"   ├─ Transaction / Gas Costs:  $0.05 USDC")
+        print("   ├─ Transaction / Gas Costs:  $0.05 USDC")
         print(f"   └─ {BOLD}{GREEN}Sandwich Bot Verdict: UNPROFITABLE. Searcher drops bundle.{RESET}")
         print(f"   Execution Result: Agent gets {res_c.victim_sol_out_sandwiched:.4f} SOL at fair market price.")
     else:
@@ -439,7 +435,7 @@ def run_simulation():
     p99 = latencies_us[990]
     avg = sum(latencies_us) / len(latencies_us)
 
-    print(f"   Iterations:  1,000 full wire-decode + DPI + policy + Ed25519 signing passes")
+    print("   Iterations:  1,000 full wire-decode + DPI + policy + Ed25519 signing passes")
     print(f"   Mean:        {avg:.2f} µs ({avg/1000.0:.3f} ms)")
     print(f"   Median (p50):{BOLD}{GREEN} {p50:.2f} µs ({p50/1000.0:.3f} ms){RESET}")
     print(f"   p95:         {p95:.2f} µs ({p95/1000.0:.3f} ms)")

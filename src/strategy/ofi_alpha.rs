@@ -3,8 +3,9 @@ use crate::orderbook::lob::LimitOrderBook;
 /// Order Flow Imbalance (OFI) Alpha Model.
 ///
 /// Grounded in:
+/// - Order Flow Imbalance (Cont, Kukanov & Stoikov, 2014) for queue-depletion price change relationship.
 /// - Kyle's Lambda (Kyle, 1985; Hasbrouck, 1991): dP / d(OFI) price impact coefficient.
-/// - Concave Square-Root Law of Market Impact (Cont, Kukanov & Stoikov, 2014; Bouchaud et al., 2018):
+/// - Concave Square-Root Law of Market Impact (Bouchaud, Gefen, Potters & Wyart, 2004; Bouchaud et al., 2018):
 ///   Replaces naive linear extrapolation to prevent extreme over-skewing on large block sweeps.
 #[derive(Debug, Clone)]
 pub struct OfiAlpha {

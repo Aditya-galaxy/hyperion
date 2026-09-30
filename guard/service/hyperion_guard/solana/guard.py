@@ -14,20 +14,19 @@ allowing multi-sig or co-signed execution on Solana.
 
 from __future__ import annotations
 
+import struct
 import time
 from dataclasses import dataclass, field
-from decimal import Decimal
-from typing import Dict, List, Optional, Tuple, Any
 
 from Crypto.PublicKey import ECC
 from Crypto.Signature import eddsa
 
-from .base58 import b58encode, b58decode
+from .base58 import b58encode
 from .decoder import (
     ALLOWLISTED_PROGRAMS,
-    DecodedSolanaTransaction,
     decode_solana_transaction,
 )
+
 
 @dataclass
 class SolanaAgentPolicy:
@@ -41,7 +40,7 @@ class SolanaAgentPolicy:
     is_killed: bool = False
     policy_version: int = 1
     require_guard_signer: bool = True # Forces Guard to be a required signer in tx
-    allowed_programs: List[str] = field(default_factory=lambda: list(ALLOWLISTED_PROGRAMS.keys()))
+    allowed_programs: list[str] = field(default_factory=lambda: list(ALLOWLISTED_PROGRAMS.keys()))
 
 @dataclass
 class SolanaVerdict:
@@ -51,12 +50,12 @@ class SolanaVerdict:
     recent_blockhash: str
     evaluated_at_ns: int
     cosigner_pubkey: str
-    cosigner_signature_b58: Optional[str]
-    decoded_operations: List[str]
-    violation_details: Optional[str] = None
+    cosigner_signature_b58: str | None
+    decoded_operations: list[str]
+    violation_details: str | None = None
 
 class SolanaGuardEngine:
-    def __init__(self, cosigner_private_key_bytes: Optional[bytes] = None):
+    def __init__(self, cosigner_private_key_bytes: bytes | None = None):
         """Initializes the Guard engine with an Ed25519 co-signer keypair."""
         if cosigner_private_key_bytes:
             self._key = ECC.import_key(cosigner_private_key_bytes)
@@ -69,15 +68,15 @@ class SolanaGuardEngine:
         self._signer = eddsa.new(self._key, "rfc8032")
 
         # Policies and tracking state
-        self.policies: Dict[str, SolanaAgentPolicy] = {}
-        self.daily_spend_tracker: Dict[str, List[Tuple[float, float]]] = {} # agent_id -> [(time_sec, usd)]
-        self.order_timestamps: Dict[str, List[float]] = {}                  # agent_id -> [time_sec]
+        self.policies: dict[str, SolanaAgentPolicy] = {}
+        self.daily_spend_tracker: dict[str, list[tuple[float, float]]] = {} # agent_id -> [(time_sec, usd)]
+        self.order_timestamps: dict[str, list[float]] = {}                  # agent_id -> [time_sec]
 
     @property
     def pubkey_b58(self) -> str:
         return self.cosigner_pubkey_b58
 
-    def get_policy(self, agent_id: str) -> Optional[SolanaAgentPolicy]:
+    def get_policy(self, agent_id: str) -> SolanaAgentPolicy | None:
         """Retrieves policy for an agent if registered."""
         return self.policies.get(agent_id)
 
@@ -145,7 +144,7 @@ class SolanaGuardEngine:
         # 2. Decode serialized transaction
         try:
             decoded = decode_solana_transaction(raw_tx_bytes)
-        except Exception as e:
+        except (ValueError, struct.error, KeyError, IndexError, TypeError) as e:
             return SolanaVerdict(
                 approved=False,
                 status="MALFORMED_TRANSACTION",
@@ -155,7 +154,7 @@ class SolanaGuardEngine:
                 cosigner_pubkey=self.cosigner_pubkey_b58,
                 cosigner_signature_b58=None,
                 decoded_operations=[],
-                violation_details=f"Failed to decode Solana wire transaction: {str(e)}"
+                violation_details=f"Failed to decode Solana wire transaction: {e!s}"
             )
 
         # 3. Guard Signer Requirement (Forces Guard co-signature to matter!)
@@ -234,16 +233,14 @@ class SolanaGuardEngine:
                 )
 
             # Check C: Notional Size Estimation
-            if inst.operation in ("JUPITER_SWAP", "PHOENIX_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED"):
-                if inst.input_amount is not None:
-                    # Assume 6 decimals (standard for USDC on Solana)
-                    est_usd = float(inst.input_amount) / 1e6
-                    total_estimated_usd += est_usd
-            elif inst.operation == "SOL_TRANSFER":
-                if inst.input_amount is not None:
-                    # Lamports (9 decimals) * sol_price_usd
-                    est_usd = (float(inst.input_amount) / 1e9) * sol_price_usd
-                    total_estimated_usd += est_usd
+            if inst.operation in ("JUPITER_SWAP", "PHOENIX_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED") and inst.input_amount is not None:
+                # Assume 6 decimals (standard for USDC on Solana)
+                est_usd = float(inst.input_amount) / 1e6
+                total_estimated_usd += est_usd
+            elif inst.operation == "SOL_TRANSFER" and inst.input_amount is not None:
+                # Lamports (9 decimals) * sol_price_usd
+                est_usd = (float(inst.input_amount) / 1e9) * sol_price_usd
+                total_estimated_usd += est_usd
 
         # Check D: Order Notional Cap
         if total_estimated_usd > policy.max_order_notional_usd:

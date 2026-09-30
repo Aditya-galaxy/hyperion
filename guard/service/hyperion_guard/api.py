@@ -16,6 +16,7 @@ and everything else passes through free, so anyone can audit a verdict.
 from __future__ import annotations
 
 import base64
+import binascii
 import re
 from typing import Annotated
 
@@ -120,7 +121,7 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
             verifier = eddsa.new(key, "rfc8032")
             verifier.verify(message, raw_sig)
             return True
-        except Exception:
+        except (ValueError, TypeError):
             return False
 
     @app.get("/v1/solana/health")
@@ -182,7 +183,7 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
                 "max_slippage_bps": policy.max_slippage_bps,
                 "policy_version": policy.policy_version,
                 "require_guard_signer": policy.require_guard_signer,
-                "allowed_programs": sorted(list(policy.allowed_programs)),
+                "allowed_programs": sorted(policy.allowed_programs),
             },
         }
 
@@ -199,7 +200,7 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
             "max_slippage_bps": policy.max_slippage_bps,
             "policy_version": policy.policy_version,
             "require_guard_signer": policy.require_guard_signer,
-            "allowed_programs": sorted(list(policy.allowed_programs)),
+            "allowed_programs": sorted(policy.allowed_programs),
             "killed": policy.is_killed,
         }
 
@@ -275,7 +276,7 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
             if encoding == "base58":
                 raw_bytes = b58decode(tx_raw)
             elif encoding == "hex" or tx_raw.startswith("0x"):
-                hex_str = tx_raw[2:] if tx_raw.startswith("0x") else tx_raw
+                hex_str = tx_raw.removeprefix("0x")
                 raw_bytes = bytes.fromhex(hex_str)
             elif encoding == "base64":
                 raw_bytes = base64.b64decode(tx_raw)
@@ -285,9 +286,9 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
                 else:
                     try:
                         raw_bytes = base64.b64decode(tx_raw)
-                    except Exception:
+                    except (ValueError, binascii.Error):
                         raw_bytes = b58decode(tx_raw)
-        except Exception as exc:
+        except (ValueError, binascii.Error, TypeError) as exc:
             raise HTTPException(422, f"Failed to decode transaction bytes: {exc}") from None
 
         verdict = solana_guard.evaluate_transaction(agent_id, raw_bytes)

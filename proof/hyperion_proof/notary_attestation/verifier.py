@@ -8,7 +8,6 @@ or ERC-8004 Reputation Registry anchoring.
 from __future__ import annotations
 
 import time
-from typing import Optional, Set
 
 from eth_account import Account
 from eth_account.messages import encode_defunct
@@ -23,8 +22,8 @@ class NotaryVerificationError(Exception):
 class NotaryAttestationVerifier:
     def __init__(
         self,
-        trusted_notaries: Optional[Set[str]] = None,
-        allowed_servers: Optional[Set[str]] = None,
+        trusted_notaries: set[str] | None = None,
+        allowed_servers: set[str] | None = None,
         max_timestamp_skew_seconds: int = 3600 * 24 * 7,  # 7 days max age
     ):
         """
@@ -37,7 +36,7 @@ class NotaryAttestationVerifier:
         self.allowed_servers = {s.lower() for s in allowed_servers} if allowed_servers else {"api.hyperliquid.xyz"}
         self.max_age_s = max_timestamp_skew_seconds
 
-    def verify(self, attestation: NotaryAttestation, current_time_s: Optional[float] = None) -> bool:
+    def verify(self, attestation: NotaryAttestation, current_time_s: float | None = None) -> bool:
         """
         Verifies notary cryptographic signature, server hostname allowlist,
         credential redaction integrity, and timestamp freshness.
@@ -48,17 +47,18 @@ class NotaryAttestationVerifier:
         if attestation.server_name.lower() not in self.allowed_servers:
             raise NotaryVerificationError(
                 f"Untrusted exchange server name '{attestation.server_name}'. "
-                f"Allowed servers: {sorted(list(self.allowed_servers))}"
+                f"Allowed servers: {sorted(self.allowed_servers)}"
             )
 
         # 2. Check Credential Redaction (Ensure sensitive credentials are never leaked in plain text)
         for header, val in attestation.redacted_headers.items():
             h_lower = header.lower()
-            if any(k in h_lower for k in ("key", "secret", "auth", "token", "signature")):
-                if not (val.startswith("[REDACTED") or val == "***"):
-                    raise NotaryVerificationError(
-                        f"Unredacted sensitive credential detected in header '{header}'"
-                    )
+            if any(k in h_lower for k in ("key", "secret", "auth", "token", "signature")) and not (
+                val.startswith("[REDACTED") or val == "***"
+            ):
+                raise NotaryVerificationError(
+                    f"Unredacted sensitive credential detected in header '{header}'"
+                )
 
         # 3. Verify Timestamp Freshness
         attestation_time_s = attestation.timestamp_ms / 1000.0
@@ -74,7 +74,7 @@ class NotaryAttestationVerifier:
         msg = encode_defunct(hexstr=digest)
         try:
             recovered_signer = Account.recover_message(msg, signature=attestation.notary_signature).lower()
-        except Exception as exc:
+        except (ValueError, TypeError) as exc:
             raise NotaryVerificationError(f"Failed to recover notary signature: {exc}") from None
 
         if recovered_signer != attestation.notary_pubkey.lower():

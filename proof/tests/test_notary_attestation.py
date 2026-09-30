@@ -13,13 +13,11 @@ from decimal import Decimal
 
 import pytest
 from eth_account import Account
-
 from hyperion_proof.metrics import compute_modified_dietz
 from hyperion_proof.notary_attestation import (
-    NotaryAttestation,
+    SCHEMA_NOTARY_ATTESTATION,
     NotaryAttestationVerifier,
     NotaryVerificationError,
-    SCHEMA_NOTARY_ATTESTATION,
     create_hyperliquid_notary_attestation,
     normalize_hyperliquid_fills,
     sign_notary_attestation,
@@ -183,4 +181,4 @@ def test_hyperliquid_trade_normalization_to_modified_dietz():
     assert Decimal(out["realizedPnlUsd"]) == Decimal("50.00")
     assert Decimal(out["totalFeesUsd"]) == Decimal("0.305")
     assert Decimal(out["winRate"]) == Decimal("0.5")
-    assert Decimal(out["tradeSharpeRatio"]) > Decimal("0")
+    assert Decimal(out["tradeSharpeRatio"]) > Decimal(0)

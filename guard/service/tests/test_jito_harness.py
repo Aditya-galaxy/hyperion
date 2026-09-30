@@ -17,8 +17,8 @@ if str(SERVICE_DIR) not in sys.path:
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from jito_mev_harness import AMMPool, JitoSandwichSimulator, build_jupiter_swap_tx
 from hyperion_guard.solana import SolanaAgentPolicy, SolanaGuardEngine
+from jito_mev_harness import AMMPool, JitoSandwichSimulator, build_jupiter_swap_tx
 
 
 def test_amm_pool_constant_product_invariant():

@@ -10,24 +10,20 @@ from __future__ import annotations
 
 import base64
 import struct
-from typing import Optional
 
 from Crypto.PublicKey import ECC
 from Crypto.Signature import eddsa
 from fastapi.testclient import TestClient
-
 from hyperion_guard.api import create_app
 from hyperion_guard.solana import (
-    b58encode,
-    b58decode,
-    decode_solana_transaction,
-    decode_jupiter_instruction,
     JUPITER_V6_PROGRAM_ID,
     PHOENIX_PROGRAM_ID,
-    SPL_TOKEN_PROGRAM_ID,
-    SYSTEM_PROGRAM_ID,
     SolanaAgentPolicy,
     SolanaGuardEngine,
+    b58decode,
+    b58encode,
+    decode_jupiter_instruction,
+    decode_solana_transaction,
 )
 
 
@@ -48,8 +44,8 @@ def build_mock_solana_tx(
     program_id_b58: str,
     instruction_data: bytes,
     agent_pubkey_b58: str = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-    guard_pubkey_b58: Optional[str] = None,
-    num_signatures: Optional[int] = None,
+    guard_pubkey_b58: str | None = None,
+    num_signatures: int | None = None,
     guard_as_signer: bool = True,
 ) -> bytes:
     """Helper to synthesize a valid wire-format Solana transaction payload."""

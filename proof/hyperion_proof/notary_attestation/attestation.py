@@ -16,7 +16,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from eth_account import Account
 from eth_account.messages import encode_defunct
@@ -37,7 +37,7 @@ class NotaryAttestation:
     notary_pubkey: str                   # Notary address (0x-prefixed)
     notary_signature: str                # Notary signature over canonical claims
     transcript_commitment: str           # Keccak-256 hash of payload/response
-    redacted_headers: Dict[str, str]     # Headers with sensitive keys masked
+    redacted_headers: dict[str, str]     # Headers with sensitive keys masked
     revealed_payload: Any                # Plaintext JSON response (trades, balances, fills)
     timestamp_ms: int                    # Handshake epoch timestamp in milliseconds
 
@@ -94,13 +94,13 @@ def sign_notary_attestation(
     return attestation
 
 
-def normalize_hyperliquid_fills(raw_fills: List[Dict[str, Any]]) -> List[TradeFill]:
+def normalize_hyperliquid_fills(raw_fills: list[dict[str, Any]]) -> list[TradeFill]:
     """
     Normalizes Hyperliquid public userFills response into standard TradeFill objects.
     Each raw fill from /info {"type": "userFills"} has:
         coin, px, sz, side ('B' or 'A'), time, closedPnl, fee, tid, oid, hash
     """
-    fills: List[TradeFill] = []
+    fills: list[TradeFill] = []
     for f in sorted(raw_fills, key=lambda x: int(x.get("time", 0))):
         coin = str(f.get("coin", "UNKNOWN"))
         px = Decimal(str(f["px"]))
@@ -128,9 +128,9 @@ def create_hyperliquid_notary_attestation(
     payload: Any,
     notary_private_key: str,
     endpoint: str = "/info",
-    session_id: Optional[str] = None,
-    timestamp_ms: Optional[int] = None,
-    custom_headers: Optional[Dict[str, str]] = None,
+    session_id: str | None = None,
+    timestamp_ms: int | None = None,
+    custom_headers: dict[str, str] | None = None,
 ) -> NotaryAttestation:
     """
     Constructs and signs a NotaryAttestation prototype for Hyperliquid response data.

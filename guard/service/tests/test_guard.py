@@ -10,7 +10,6 @@ from decimal import Decimal
 
 import pytest
 from eth_account import Account
-
 from hyperion_guard import verdict as vd
 from hyperion_guard.chain import RpcError
 from hyperion_guard.engine import ExecutorCall, Guard, GuardUnavailable, parse_order
@@ -237,7 +236,6 @@ def test_parse_order_rejects_garbage():
 @pytest.fixture
 def client(guard):
     from fastapi.testclient import TestClient
-
     from hyperion_guard.api import create_app
     return TestClient(create_app(guard))
 

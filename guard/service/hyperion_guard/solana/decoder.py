@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Dict, Any
+from typing import Any
 
-from .base58 import b58encode, b58decode
+from .base58 import b58encode
 
 # Known Solana Program IDs
 JUPITER_V6_PROGRAM_ID = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
@@ -41,23 +41,23 @@ class DecodedInstruction:
     program_id: str
     program_label: str
     operation: str
-    accounts: List[str]
-    input_amount: Optional[int] = None
-    min_output_amount: Optional[int] = None
-    slippage_bps: Optional[int] = None
-    details: Dict[str, Any] = field(default_factory=dict)
+    accounts: list[str]
+    input_amount: int | None = None
+    min_output_amount: int | None = None
+    slippage_bps: int | None = None
+    details: dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class DecodedSolanaTransaction:
     message_bytes: bytes
-    signatures: List[str]
-    account_keys: List[str]
+    signatures: list[str]
+    account_keys: list[str]
     recent_blockhash: str
-    instructions: List[DecodedInstruction]
+    instructions: list[DecodedInstruction]
     is_versioned: bool
     num_required_signatures: int
 
-def read_compact_u16(data: bytes, offset: int) -> Tuple[int, int]:
+def read_compact_u16(data: bytes, offset: int) -> tuple[int, int]:
     """Reads a Solana compact-u16 integer and returns (value, new_offset)."""
     val = 0
     shift = 0
@@ -72,7 +72,7 @@ def read_compact_u16(data: bytes, offset: int) -> Tuple[int, int]:
     return val, idx
 
 # Published Jupiter V6 Anchor Instruction Discriminators (sha256("global:<name>")[:8])
-JUPITER_DISCRIMINATORS: Dict[str, str] = {
+JUPITER_DISCRIMINATORS: dict[str, str] = {
     "e517cb977ae3ad2a": "route",
     "5703feb8e7573909": "sharedAccountsRoute",
     "34650f14745e8de8": "routeWithTokenLedger",
@@ -82,7 +82,7 @@ JUPITER_DISCRIMINATORS: Dict[str, str] = {
 }
 
 
-def decode_jupiter_instruction(data: bytes, accounts: List[str]) -> Tuple[str, Optional[int], Optional[int], Optional[int], Dict[str, Any]]:
+def decode_jupiter_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
     """
     Decodes Jupiter V6 Aggregator instructions.
 
@@ -108,7 +108,7 @@ def decode_jupiter_instruction(data: bytes, accounts: List[str]) -> Tuple[str, O
     except struct.error as exc:
         return "UNKNOWN_JUPITER", None, None, None, {"discriminator": discriminator, "error": str(exc)}
 
-    details: Dict[str, Any] = {
+    details: dict[str, Any] = {
         "instruction_name": route_name,
         "discriminator": discriminator,
         "in_amount_raw": in_amount,
@@ -120,13 +120,13 @@ def decode_jupiter_instruction(data: bytes, accounts: List[str]) -> Tuple[str, O
 
     return "JUPITER_SWAP", in_amount, quoted_out, slippage_bps, details
 
-def decode_phoenix_instruction(data: bytes, accounts: List[str]) -> Tuple[str, Optional[int], Optional[int], Optional[int], Dict[str, Any]]:
+def decode_phoenix_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
     """Decodes Phoenix Limit Order Book instructions."""
     if len(data) < 1:
         return "UNKNOWN_PHOENIX", None, None, None, {}
 
     tag = data[0]
-    details: Dict[str, Any] = {"phoenix_tag": tag}
+    details: dict[str, Any] = {"phoenix_tag": tag}
 
     # Tag 0 = Swap / Market Order, Tag 1 = NewOrder / Limit Order
     if tag == 0 and len(data) >= 9:
@@ -141,7 +141,7 @@ def decode_phoenix_instruction(data: bytes, accounts: List[str]) -> Tuple[str, O
 
     return "PHOENIX_OPERATION", None, None, None, details
 
-def decode_spl_token_instruction(data: bytes, accounts: List[str]) -> Tuple[str, Optional[int], Optional[int], Optional[int], Dict[str, Any]]:
+def decode_spl_token_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
     """Decodes SPL Token Program transfers."""
     if len(data) < 1:
         return "UNKNOWN_TOKEN", None, None, None, {}
@@ -157,7 +157,7 @@ def decode_spl_token_instruction(data: bytes, accounts: List[str]) -> Tuple[str,
 
     return "TOKEN_PROGRAM_INSTRUCTION", None, None, None, {"type_id": ins_type}
 
-def decode_system_instruction(data: bytes, accounts: List[str]) -> Tuple[str, Optional[int], Optional[int], Optional[int], Dict[str, Any]]:
+def decode_system_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
     """Decodes Solana System Program instructions (SOL transfers)."""
     if len(data) >= 12:
         ins_type = struct.unpack_from("<I", data, 0)[0]
@@ -213,7 +213,7 @@ def decode_solana_transaction(raw_bytes: bytes) -> DecodedSolanaTransaction:
 
     # 6. Compiled Instructions
     num_instructions, msg_offset = read_compact_u16(message_bytes, msg_offset)
-    instructions: List[DecodedInstruction] = []
+    instructions: list[DecodedInstruction] = []
 
     for _ in range(num_instructions):
         prog_id_idx = message_bytes[msg_offset]
