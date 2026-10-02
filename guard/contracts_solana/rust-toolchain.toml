@@ -1,0 +1,5 @@
+[toolchain]
+# Host toolchain for the LiteSVM tests (their dependencies need Rust >= 1.97).
+# The on-chain build uses cargo build-sbf's own platform-tools compiler.
+channel = "1.99.0"
+profile = "minimal"

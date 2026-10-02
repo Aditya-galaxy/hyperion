@@ -126,3 +126,35 @@ jobs:
     # Offline: a recorded Hyperliquid response and hand-built series.
     - name: Run tests
       run: pytest proof/tests -q
+
+  solana_vault:
+    name: Solana vault (SBF build + LiteSVM)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: guard/contracts_solana
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # rust-toolchain.toml in this folder selects the host toolchain the tests need.
+    - name: Cache cargo, the SBF platform tools and the build
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/
+          ~/.cache/solana/
+          guard/contracts_solana/target/
+        key: ${{ runner.os }}-solana-vault-${{ hashFiles('guard/contracts_solana/Cargo.lock', 'guard/contracts_solana/rust-toolchain.toml') }}
+
+    - name: Install cargo-build-sbf
+      run: command -v cargo-build-sbf || cargo install --locked cargo-build-sbf
+
+    - name: Build the program
+      run: cargo build-sbf
+
+    # Unit tests on the host, then the compiled program in LiteSVM.
+    - name: Test
+      run: cargo test
