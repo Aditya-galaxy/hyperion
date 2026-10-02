@@ -71,6 +71,10 @@ class SolanaGuardEngine:
         self.policies: dict[str, SolanaAgentPolicy] = {}
         self.daily_spend_tracker: dict[str, list[tuple[float, float]]] = {} # agent_id -> [(time_sec, usd)]
         self.order_timestamps: dict[str, list[float]] = {}                  # agent_id -> [time_sec]
+        # Highest control-message nonce accepted per agent (policy, kill and revive share
+        # one sequence), so a signed message can never be replayed. In memory, like the rest
+        # of this engine's state: a restart forgets it, as it forgets the policies.
+        self.last_nonce: dict[str, int] = {}
 
     @property
     def pubkey_b58(self) -> str:
@@ -83,6 +87,14 @@ class SolanaGuardEngine:
     def set_policy(self, policy: SolanaAgentPolicy):
         """Registers or updates policy for an agent."""
         self.policies[policy.agent_id] = policy
+
+    def consume_nonce(self, agent_id: str, nonce: int) -> bool:
+        """Accept `nonce` for `agent_id` only if it's above every nonce accepted
+        before. Call after the signature checks out, before applying the action."""
+        if nonce <= self.last_nonce.get(agent_id, 0):
+            return False
+        self.last_nonce[agent_id] = nonce
+        return True
 
     def kill_agent(self, agent_id: str, reason: str = "") -> bool:
         """Emergency circuit breaker: trips kill switch."""

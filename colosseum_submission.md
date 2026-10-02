@@ -77,7 +77,7 @@ Hyperion Guard is built as a zero-overhead, sub-millisecond service within the H
 | **Wire Transaction Decoder** | [`guard/service/hyperion_guard/solana/decoder.py`](guard/service/hyperion_guard/solana/decoder.py) | Compact-u16 parser, legacy & V0 transaction header decoding, compiled instruction resolution, and Anchor DEX discriminator + suffix unpacking. |
 | **Pre-Trade Risk Engine** | [`guard/service/hyperion_guard/solana/guard.py`](guard/service/hyperion_guard/solana/guard.py) | Real-time policy evaluation, rate limiting, kill switch state machine, co-signer presence verification, and RFC 8032 Ed25519 message signing. |
 | **REST API Gateway** | [`guard/service/hyperion_guard/api.py`](guard/service/hyperion_guard/api.py) | High-throughput FastAPI endpoints (`/v1/solana/check`, `/v1/solana/policy`, `/v1/solana/kill`, `/v1/solana/revive`, `/v1/solana/health`). |
-| **Dual-Signer Solana Vault** | [`guard/contracts_solana/src/lib.rs`](guard/contracts_solana/src/lib.rs) | Dual-signer execution vault state machine requiring Agent + Guard signatures and on-chain circuit breakers. |
+| **Dual-Signer Solana Vault (specification)** | [`guard/contracts_solana/src/lib.rs`](guard/contracts_solana/src/lib.rs) | Tested state machine for a vault that requires Agent + Guard signatures, with kill and owner-only revive. Not yet a deployable Solana program: the on-chain version is the next milestone. |
 
 ### Supported Solana Protocols
 - **Jupiter V6 Aggregator:** `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4`
@@ -197,6 +197,6 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 
 - **GitHub Repository:** [https://github.com/Aditya-galaxy/hyperion](https://github.com/Aditya-galaxy/hyperion)
 - **Solana Guard Module:** [`guard/service/hyperion_guard/solana/`](guard/service/hyperion_guard/solana/)
-- **Solana Execution Vault Contract:** [`guard/contracts_solana/`](guard/contracts_solana/)
+- **Solana Execution Vault (state-machine specification, not yet deployed):** [`guard/contracts_solana/`](guard/contracts_solana/)
 - **Jito MEV Simulation Harness:** [`scripts/jito_mev_harness.py`](scripts/jito_mev_harness.py)
 - **Test Suite:** [`guard/service/tests/test_solana_guard.py`](guard/service/tests/test_solana_guard.py)

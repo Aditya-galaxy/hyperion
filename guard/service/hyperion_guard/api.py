@@ -25,6 +25,7 @@ from fastapi import Body, FastAPI, HTTPException
 
 from .engine import ExecutorCall, Guard, GuardUnavailable, parse_order
 from .solana import SolanaAgentPolicy, SolanaGuardEngine, b58decode
+from .solana.control import action_message, policy_message
 
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 HEX = re.compile(r"^0x([0-9a-fA-F]{2})*$")
@@ -150,7 +151,11 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         if not owner_sig:
             raise HTTPException(401, "Missing owner Ed25519 signature (signature_b58)")
 
-        msg = f"hyperion-guard/solana/policy/v1:{agent_id}:{owner_pubkey}:{max_notional:.2f}:{max_slippage}:{nonce}:{policy_version}".encode()
+        # The signature covers every field, so nothing can be changed in transit.
+        msg = policy_message(agent_id=agent_id, owner=owner_pubkey, guardian=guardian_pubkey,
+                             max_order_notional_usd=max_notional, max_slippage_bps=max_slippage,
+                             policy_version=policy_version, nonce=nonce, require_guard_signer=require_guard,
+                             allowed_programs=allowed)
         if not _verify_ed25519_sig(owner_pubkey, msg, owner_sig):
             raise HTTPException(401, "Invalid owner signature for policy update")
 
@@ -161,6 +166,8 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
                 raise HTTPException(403, "Forbidden: Only the registered owner can modify an existing policy")
             if policy_version <= existing.policy_version:
                 raise HTTPException(409, f"policy_version {policy_version} must be strictly greater than current version {existing.policy_version}")
+        if not solana_guard.consume_nonce(agent_id, nonce):
+            raise HTTPException(409, "nonce already used: sign a new message with a higher nonce")
 
         policy = SolanaAgentPolicy(
             agent_id=agent_id,
@@ -220,7 +227,7 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         if not caller_pubkey or not sig_b58:
             raise HTTPException(401, "caller_pubkey and signature_b58 are required to trip kill switch")
 
-        msg = f"hyperion-guard/solana/kill/v1:{agent_id}:{nonce}".encode()
+        msg = action_message("kill", agent_id, nonce)
         if not _verify_ed25519_sig(caller_pubkey, msg, sig_b58):
             raise HTTPException(401, "Invalid signature for kill switch invocation")
 
@@ -230,6 +237,8 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
 
         if caller_pubkey not in authorized_callers:
             raise HTTPException(403, "Forbidden: Caller is neither owner nor guardian")
+        if not solana_guard.consume_nonce(agent_id, nonce):
+            raise HTTPException(409, "nonce already used: sign a new message with a higher nonce")
 
         reason = str(body.get("reason", "Emergency kill switch triggered"))
         solana_guard.kill_agent(agent_id, reason=reason)
@@ -251,13 +260,15 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         if not caller_pubkey or not sig_b58:
             raise HTTPException(401, "caller_pubkey and signature_b58 are required to revive agent")
 
-        msg = f"hyperion-guard/solana/revive/v1:{agent_id}:{nonce}".encode()
+        msg = action_message("revive", agent_id, nonce)
         if not _verify_ed25519_sig(caller_pubkey, msg, sig_b58):
             raise HTTPException(401, "Invalid signature for agent revival")
 
         # ONLY the owner can revive! (Guardian or agent CANNOT revive)
         if caller_pubkey != policy.owner_solana_pubkey:
             raise HTTPException(403, "Forbidden: Guardian cannot revive, only the registered owner can revive an agent")
+        if not solana_guard.consume_nonce(agent_id, nonce):
+            raise HTTPException(409, "nonce already used: an old revive can't undo a newer kill")
 
         solana_guard.revive_agent(agent_id)
         return {"ok": True, "agent_id": agent_id, "killed": False}

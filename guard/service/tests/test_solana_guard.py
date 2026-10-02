@@ -25,6 +25,7 @@ from hyperion_guard.solana import (
     decode_jupiter_instruction,
     decode_solana_transaction,
 )
+from hyperion_guard.solana.control import policy_message
 
 
 def build_jupiter_ix_data(
@@ -136,8 +137,14 @@ def sign_policy_payload(
     max_slippage: int,
     nonce: int,
     policy_version: int,
+    guardian: str = "",
+    allowed_programs: list[str] | None = None,
+    require_guard_signer: bool = True,
 ) -> str:
-    msg = f"hyperion-guard/solana/policy/v1:{agent_id}:{owner_pubkey}:{max_notional:.2f}:{max_slippage}:{nonce}:{policy_version}".encode()
+    msg = policy_message(agent_id=agent_id, owner=owner_pubkey, guardian=guardian,
+                         max_order_notional_usd=max_notional, max_slippage_bps=max_slippage,
+                         policy_version=policy_version, nonce=nonce, require_guard_signer=require_guard_signer,
+                         allowed_programs=allowed_programs)
     signer = eddsa.new(key, "rfc8032")
     return b58encode(signer.sign(msg))
 
@@ -175,7 +182,8 @@ def test_decode_real_mainnet_jupiter_swap():
     """
     Tests decoding against real Jupiter V6 instruction data from mainnet transaction
     7zoC74aDKgHFJSsybBhUBUfyEYPsLMs9tEywS7jCY5Bqd7K8sfdQkRvKvrNRrf9bLdWY8YWuQMn8zLVJVKwqziX.
-    Instruction data: PrpFmsY4d26dKbdKP4k8r2Gce9GTJ53gRUqSXvA7BqcdAHQ3 (sharedAccountsRoute)
+    Instruction data: PrpFmsY4d26dKbdKP4k8r2Gce9GTJ53gRUqSXvA7BqcdAHQ3 (route, one route-plan step),
+    checked against the transaction via getTransaction on mainnet-beta.
     """
     raw_ix_data = b58decode("PrpFmsY4d26dKbdKP4k8r2Gce9GTJ53gRUqSXvA7BqcdAHQ3")
     op_type, in_amt, quoted_out, slippage_bps, details = decode_jupiter_instruction(raw_ix_data, [])
@@ -453,7 +461,8 @@ def test_solana_api_lifecycle():
 
     # 3. Configure initial policy (version 1) signed by owner
     sig_v1 = sign_policy_payload(
-        owner_key, "test-agent-solana", owner_pubkey_b58, 1500.0, 50, nonce=1, policy_version=1
+        owner_key, "test-agent-solana", owner_pubkey_b58, 1500.0, 50, nonce=1, policy_version=1,
+        guardian=guardian_pubkey_b58, allowed_programs=[JUPITER_V6_PROGRAM_ID],
     )
     res_set = client.post("/v1/solana/policy", json={
         "agent_id": "test-agent-solana",
@@ -586,3 +595,33 @@ def test_solana_api_lifecycle():
     })
     assert res_restored.status_code == 200
     assert res_restored.json()["approved"] is True
+
+    # 14. A validly signed update can't be altered in transit: every field is signed.
+    sig_v2 = sign_policy_payload(
+        owner_key, "test-agent-solana", owner_pubkey_b58, 1500.0, 50, nonce=13, policy_version=2,
+        guardian=guardian_pubkey_b58, allowed_programs=[JUPITER_V6_PROGRAM_ID],
+    )
+    signed_v2 = {
+        "agent_id": "test-agent-solana", "owner_solana_pubkey": owner_pubkey_b58,
+        "guardian_solana_pubkey": guardian_pubkey_b58, "max_order_notional_usd": 1500.0,
+        "max_slippage_bps": 50, "policy_version": 2, "nonce": 13, "signature_b58": sig_v2,
+        "allowed_programs": [JUPITER_V6_PROGRAM_ID], "require_guard_signer": True,
+    }
+    drainer = "Drain1111111111111111111111111111111111111111"
+    for tampered in ({**signed_v2, "allowed_programs": [JUPITER_V6_PROGRAM_ID, drainer]},
+                     {**signed_v2, "require_guard_signer": False},
+                     {**signed_v2, "guardian_solana_pubkey": imposter_pubkey_b58}):
+        assert client.post("/v1/solana/policy", json=tampered).status_code == 401
+    assert client.post("/v1/solana/policy", json=signed_v2).status_code == 200
+    assert client.post("/v1/solana/policy", json=signed_v2).status_code == 409    # and it can't be replayed
+
+    # 15. An old revive can't undo a newer kill.
+    kill2 = sign_kill_payload(guardian_key, "test-agent-solana", nonce=14)
+    assert client.post("/v1/solana/kill", json={
+        "agent_id": "test-agent-solana", "caller_pubkey": guardian_pubkey_b58,
+        "nonce": 14, "signature_b58": kill2}).status_code == 200
+    replayed = client.post("/v1/solana/revive", json={
+        "agent_id": "test-agent-solana", "caller_pubkey": owner_pubkey_b58,
+        "nonce": 12, "signature_b58": owner_revive_sig})
+    assert replayed.status_code == 409
+    assert client.get("/v1/solana/policy/test-agent-solana").json()["killed"] is True

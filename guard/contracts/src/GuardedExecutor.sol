@@ -71,12 +71,12 @@ contract GuardedExecutor is ReentrancyGuard {
     ///   - Uniswap V3 exactInputSingle (SwapRouter01: 0x414bf389): amountIn is word 5 (bytes 164..196)
     ///   - Uniswap V3 exactInputSingle (SwapRouter02: 0x04e45aaf): amountIn is word 4 (bytes 132..164)
     ///   - Uniswap V2 swapExactTokensForTokens(uint256,uint256,address[],address,uint256): amountIn
-    ///   - ERC20 transfer(address,uint256): amount
+    ///   - ERC20 transfer(address,uint256): amount, only when the target token is USDC
     ///
     /// NOTE: For token swaps, amountIn is in the input token's units and is only directly
     /// comparable to declared USDC notional when tokenIn is USDC. If usdc != address(0)
     /// and tokenIn != usdc, returns 0 so un-convertible notional is not misread.
-    function decodeCalldataNotional(bytes calldata data) public view returns (uint256) {
+    function decodeCalldataNotional(address target, bytes calldata data) public view returns (uint256) {
         if (data.length < 4) return 0;
         bytes4 selector = bytes4(data[:4]);
 
@@ -143,8 +143,10 @@ contract GuardedExecutor is ReentrancyGuard {
         }
 
         // 4. ERC20 transfer(address,uint256)
-        // selector: 0xa9059cbb
+        // selector: 0xa9059cbb. The amount is in the token's own units, so it only
+        // counts as USDC notional when the token being transferred is USDC.
         if (selector == 0xa9059cbb) {
+            if (usdc != address(0) && target != usdc) return 0;
             if (data.length >= 4 + 64) {
                 return abi.decode(data[36:68], (uint256));
             }
@@ -174,7 +176,7 @@ contract GuardedExecutor is ReentrancyGuard {
         if (!allowedTarget[target]) revert TargetNotAllowed(target);
 
         // On-chain calldata notional firewall: ensure agent did not under-report notional
-        uint256 decodedNotional = decodeCalldataNotional(data);
+        uint256 decodedNotional = decodeCalldataNotional(target, data);
         if (decodedNotional > 0 && notional < decodedNotional) {
             revert NotionalUnderreported(decodedNotional, notional);
         }

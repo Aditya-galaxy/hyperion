@@ -392,7 +392,7 @@ contract HyperionGuardTest is Test {
             uint256(65_000e8) // $65,000 / BTC
         );
         // (1e6 * 65_000e8) / 1e10 = 650_000_000 micro-USDC ($650.00)
-        uint256 decoded = exec.decodeCalldataNotional(data);
+        uint256 decoded = exec.decodeCalldataNotional(address(venue), data);
         assertEq(decoded, 650_000_000);
     }
 
@@ -416,6 +416,13 @@ contract HyperionGuardTest is Test {
         exec.execute(address(venue), data, declaredNotional, v, sig);
     }
 
+    function test_calldataNotionalDecoder_transferCountsOnlyForUsdc() public {
+        bytes memory data = abi.encodeCall(usdc.transfer, (owner, 1_234e6));
+        assertEq(exec.decodeCalldataNotional(address(usdc), data), 1_234e6); // a USDC transfer is USDC notional
+        MockUSDC other = new MockUSDC();
+        assertEq(exec.decodeCalldataNotional(address(other), data), 0); // another token's units aren't
+    }
+
     function test_calldataNotionalDecoder_uniswapV3AndV2() public view {
         // 1. Uniswap V3 SwapRouter01 exactInputSingle (0x414bf389)
         bytes memory v3Router01Data = abi.encodeWithSelector(
@@ -429,7 +436,7 @@ contract HyperionGuardTest is Test {
             uint256(1e18),
             uint160(0)
         );
-        assertEq(exec.decodeCalldataNotional(v3Router01Data), 5_000e6);
+        assertEq(exec.decodeCalldataNotional(address(venue), v3Router01Data), 5_000e6);
 
         // 2. Uniswap V3 SwapRouter02 exactInputSingle (0x04e45aaf)
         bytes memory v3Router02Data = abi.encodeWithSelector(
@@ -442,7 +449,7 @@ contract HyperionGuardTest is Test {
             uint256(1e18),
             uint160(0)
         );
-        assertEq(exec.decodeCalldataNotional(v3Router02Data), 5_000e6);
+        assertEq(exec.decodeCalldataNotional(address(venue), v3Router02Data), 5_000e6);
 
         // 3. Non-USDC tokenIn on Uniswap V3 returns 0 (un-convertible notional without oracle)
         bytes memory v3NonUsdcData = abi.encodeWithSelector(
@@ -456,7 +463,7 @@ contract HyperionGuardTest is Test {
             uint256(5_000e6),
             uint160(0)
         );
-        assertEq(exec.decodeCalldataNotional(v3NonUsdcData), 0);
+        assertEq(exec.decodeCalldataNotional(address(venue), v3NonUsdcData), 0);
 
         // 4. Uniswap V2 swapExactTokensForTokens with USDC tokenIn
         address[] memory path = new address[](2);
@@ -470,13 +477,13 @@ contract HyperionGuardTest is Test {
             address(0x3),
             uint256(block.timestamp + 1000)
         );
-        assertEq(exec.decodeCalldataNotional(v2Data), 2_500e6);
+        assertEq(exec.decodeCalldataNotional(address(venue), v2Data), 2_500e6);
 
         // 5. Uniswap V2 swapExactTokensForTokens with non-USDC tokenIn returns 0
         path[0] = address(0x999);
         bytes memory v2NonUsdcData = abi.encodeWithSelector(
             0x38ed1739, uint256(2e18), uint256(5_000e6), path, address(0x3), uint256(block.timestamp + 1000)
         );
-        assertEq(exec.decodeCalldataNotional(v2NonUsdcData), 0);
+        assertEq(exec.decodeCalldataNotional(address(venue), v2NonUsdcData), 0);
     }
 }
