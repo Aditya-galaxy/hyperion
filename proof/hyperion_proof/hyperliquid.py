@@ -22,3 +22,20 @@ def portfolio(account: str, client: httpx.Client | None = None, url: str = INFO_
     r = c.post(url, json={"type": "portfolio", "user": account.lower()})
     r.raise_for_status()
     return dict(r.json()), datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def fills(account: str, client: httpx.Client | None = None, url: str = INFO_URL) -> tuple[list[dict], str]:
+    """Fetches user executed fills (trades) for trade-by-trade ingestion."""
+    c = client or httpx.Client(timeout=20)
+    r = c.post(url, json={"type": "userFills", "user": account.lower()})
+    r.raise_for_status()
+    return list(r.json()), datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def ledger_updates(account: str, client: httpx.Client | None = None, url: str = INFO_URL) -> tuple[list[dict], str]:
+    """Fetches non-funding ledger updates (deposits, withdrawals, transfers) for Modified Dietz."""
+    c = client or httpx.Client(timeout=20)
+    r = c.post(url, json={"type": "userNonFundingLedgerUpdates", "user": account.lower()})
+    r.raise_for_status()
+    return list(r.json()), datetime.now(timezone.utc).isoformat(timespec="seconds")
+

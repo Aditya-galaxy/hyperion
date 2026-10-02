@@ -1,0 +1,10 @@
+[package]
+name = "hyperion-solana-vault"
+version = "0.1.0"
+edition = "2021"
+description = "Hyperion Guarded Vault: Solana on-chain dual-signer execution vault enforcing Guard co-signatures and circuit breakers."
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]

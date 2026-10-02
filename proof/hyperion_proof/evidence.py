@@ -30,8 +30,16 @@ def digest(doc: dict) -> str:
     return "0x" + keccak(canonical(doc)).hex()
 
 
-def build(request: Request, signature: str, portfolio_window: dict, source: str, retrieved_at: str,
-          validator: str) -> dict:
+def build(
+    request: Request,
+    signature: str,
+    portfolio_window: dict,
+    source: str,
+    retrieved_at: str,
+    validator: str,
+    method: str = metrics.METHOD_V1,
+    num_trials: int | None = None,
+) -> dict:
     """The evidence document for one request and the data fetched for it."""
     pts = metrics.points(portfolio_window["accountValueHistory"], portfolio_window["pnlHistory"])
     return {
@@ -43,7 +51,7 @@ def build(request: Request, signature: str, portfolio_window: dict, source: str,
             "accountValueHistory": portfolio_window["accountValueHistory"],
             "pnlHistory": portfolio_window["pnlHistory"],
         },
-        "metrics": metrics.compute(pts),
+        "metrics": metrics.compute(pts, method=method, num_trials=num_trials),
         "validator": validator,
     }
 
@@ -52,4 +60,8 @@ def recompute(doc: dict) -> dict:
     """The metrics the evidence's own inputs give. An honest file returns
     exactly `doc["metrics"]`."""
     inputs = doc["inputs"]
-    return metrics.compute(metrics.points(inputs["accountValueHistory"], inputs["pnlHistory"]))
+    m_info = doc.get("metrics", {})
+    method = m_info.get("method", metrics.METHOD_V1)
+    num_trials = m_info.get("numTrials")
+    pts = metrics.points(inputs["accountValueHistory"], inputs["pnlHistory"])
+    return metrics.compute(pts, method=method, num_trials=num_trials)

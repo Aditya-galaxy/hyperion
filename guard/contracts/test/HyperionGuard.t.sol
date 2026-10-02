@@ -70,7 +70,7 @@ contract HyperionGuardTest is Test {
 
         usdc = new MockUSDC();
         venue = new MockVenue();
-        exec = new GuardedExecutor(guard, owner, agent);
+        exec = new GuardedExecutor(guard, owner, agent, address(usdc));
         vm.prank(owner);
         exec.setAllowedTarget(address(venue), true);
         usdc.mint(address(exec), 10_000e6);
@@ -378,5 +378,112 @@ contract HyperionGuardTest is Test {
         vm.prank(agent);
         vm.expectRevert(GuardedExecutor.WrongOrder.selector);
         exec.execute(address(venue), abi.encodeCall(MockVenue.trade, (triedAmt)), notional, v, sig);
+    }
+
+    // ── calldata notional decoder tests ─────────────────────────────────────
+
+    function test_calldataNotionalDecoder_demoVenue() public view {
+        // Place order: 0.01 BTC (1_000_000 in 1e8) at $65,000 (65_000e8 in 1e8)
+        bytes memory data = abi.encodeWithSelector(
+            bytes4(keccak256("placeOrder(bytes32,bool,uint256,uint256)")),
+            bytes32("BTC-USD"),
+            true,
+            uint256(1_000_000), // 0.01 BTC
+            uint256(65_000e8) // $65,000 / BTC
+        );
+        // (1e6 * 65_000e8) / 1e10 = 650_000_000 micro-USDC ($650.00)
+        uint256 decoded = exec.decodeCalldataNotional(address(venue), data);
+        assertEq(decoded, 650_000_000);
+    }
+
+    function test_calldataNotionalDecoder_underreportedNotionalReverts() public {
+        bytes memory data = abi.encodeWithSelector(
+            bytes4(keccak256("placeOrder(bytes32,bool,uint256,uint256)")),
+            bytes32("BTC-USD"),
+            true,
+            uint256(1_000_000), // 0.01 BTC
+            uint256(65_000e8) // $65,000 -> 650_000_000 notional
+        );
+        uint256 declaredNotional = 100_000_000; // Agent lies: declares $100 instead of $650
+
+        (HyperionGuard.Verdict memory v, bytes memory sig) = approvedFor(data, declaredNotional);
+        vm.prank(agent);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                GuardedExecutor.NotionalUnderreported.selector, uint256(650_000_000), uint256(100_000_000)
+            )
+        );
+        exec.execute(address(venue), data, declaredNotional, v, sig);
+    }
+
+    function test_calldataNotionalDecoder_transferCountsOnlyForUsdc() public {
+        bytes memory data = abi.encodeCall(usdc.transfer, (owner, 1_234e6));
+        assertEq(exec.decodeCalldataNotional(address(usdc), data), 1_234e6); // a USDC transfer is USDC notional
+        MockUSDC other = new MockUSDC();
+        assertEq(exec.decodeCalldataNotional(address(other), data), 0); // another token's units aren't
+    }
+
+    function test_calldataNotionalDecoder_uniswapV3AndV2() public view {
+        // 1. Uniswap V3 SwapRouter01 exactInputSingle (0x414bf389)
+        bytes memory v3Router01Data = abi.encodeWithSelector(
+            0x414bf389,
+            address(usdc),
+            address(0x2),
+            uint24(3000),
+            address(0x3),
+            uint256(block.timestamp + 1000), // deadline (word 4)
+            uint256(5_000e6), // amountIn (word 5): $5,000 USDC
+            uint256(1e18),
+            uint160(0)
+        );
+        assertEq(exec.decodeCalldataNotional(address(venue), v3Router01Data), 5_000e6);
+
+        // 2. Uniswap V3 SwapRouter02 exactInputSingle (0x04e45aaf)
+        bytes memory v3Router02Data = abi.encodeWithSelector(
+            0x04e45aaf,
+            address(usdc),
+            address(0x2),
+            uint24(3000),
+            address(0x3),
+            uint256(5_000e6), // amountIn (word 4): $5,000 USDC
+            uint256(1e18),
+            uint160(0)
+        );
+        assertEq(exec.decodeCalldataNotional(address(venue), v3Router02Data), 5_000e6);
+
+        // 3. Non-USDC tokenIn on Uniswap V3 returns 0 (un-convertible notional without oracle)
+        bytes memory v3NonUsdcData = abi.encodeWithSelector(
+            0x414bf389,
+            address(0x999), // non-USDC token
+            address(usdc),
+            uint24(3000),
+            address(0x3),
+            uint256(block.timestamp + 1000),
+            uint256(2e18), // 2 WETH
+            uint256(5_000e6),
+            uint160(0)
+        );
+        assertEq(exec.decodeCalldataNotional(address(venue), v3NonUsdcData), 0);
+
+        // 4. Uniswap V2 swapExactTokensForTokens with USDC tokenIn
+        address[] memory path = new address[](2);
+        path[0] = address(usdc);
+        path[1] = address(0x2);
+        bytes memory v2Data = abi.encodeWithSelector(
+            0x38ed1739,
+            uint256(2_500e6), // amountIn: $2,500 USDC
+            uint256(1e18),
+            path,
+            address(0x3),
+            uint256(block.timestamp + 1000)
+        );
+        assertEq(exec.decodeCalldataNotional(address(venue), v2Data), 2_500e6);
+
+        // 5. Uniswap V2 swapExactTokensForTokens with non-USDC tokenIn returns 0
+        path[0] = address(0x999);
+        bytes memory v2NonUsdcData = abi.encodeWithSelector(
+            0x38ed1739, uint256(2e18), uint256(5_000e6), path, address(0x3), uint256(block.timestamp + 1000)
+        );
+        assertEq(exec.decodeCalldataNotional(address(venue), v2NonUsdcData), 0);
     }
 }

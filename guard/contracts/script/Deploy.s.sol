@@ -45,7 +45,8 @@ contract DemoSetup is Script {
 
         vm.startBroadcast();
         guard.registerAgent(agent, policy, guardian);
-        exec = new GuardedExecutor(guard, msg.sender, agent);
+        address usdcToken = vm.envOr("USDC", address(0));
+        exec = new GuardedExecutor(guard, msg.sender, agent, usdcToken);
         venue = new DemoVenue();
         exec.setAllowedTarget(address(venue), true);
         vm.stopBroadcast();

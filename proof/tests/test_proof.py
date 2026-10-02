@@ -62,10 +62,36 @@ def test_unmatched_timestamps_are_dropped_and_two_points_needed():
 def test_real_hyperliquid_history_is_internally_consistent():
     w = dict(FIXTURE)["month"]
     m = metrics.compute(metrics.points(w["accountValueHistory"], w["pnlHistory"]))
+    assert m["method"] == "twr-pnl/v1"
+    assert "sharpeRatio" not in m  # v1 does not inject unversioned fields
     change = Decimal(m["endValue"]) - Decimal(m["startValue"])
     assert Decimal(m["pnl"]) + Decimal(m["netDeposits"]) == pytest.approx(change)
     assert (Decimal(m["timeWeightedReturn"]) > 0) == (Decimal(m["pnl"]) > 0)
     assert m["intervals"] == len(w["accountValueHistory"]) - 1
+
+
+def test_deflated_sharpe_ratio_and_moments():
+    w = dict(FIXTURE)["month"]
+    pts = metrics.points(w["accountValueHistory"], w["pnlHistory"])
+    m_10 = metrics.compute(pts, method=metrics.METHOD_V2, num_trials=10)
+    m_1000 = metrics.compute(pts, method=metrics.METHOD_V2, num_trials=1000)
+
+    # 1. Moments must be populated and finite under v2
+    assert m_10["method"] == "twr-pnl/v2"
+    assert "sharpeRatio" in m_10
+    assert "probabilisticSharpeRatio" in m_10
+    assert "deflatedSharpeRatio" in m_10
+    assert "skewness" in m_10
+    assert "kurtosis" in m_10
+    assert m_10["numTrials"] == 10
+
+    # 2. Deflated Sharpe under 1000 trials must be strictly lower or equal to 10 trials (Bailey & López de Prado)
+    dsr_10 = Decimal(m_10["deflatedSharpeRatio"])
+    dsr_1000 = Decimal(m_1000["deflatedSharpeRatio"])
+    assert dsr_1000 <= dsr_10, "More trials must deflate the Sharpe ratio confidence"
+    assert 0 <= dsr_10 <= 1
+    assert 0 <= dsr_1000 <= 1
+
 
 
 # ── the signed request ───────────────────────────────────────────────────────
@@ -149,3 +175,56 @@ def test_feedback_entries_and_calldata():
     assert (agent, value, dec, t1, t2, endpoint, uri) == (7, entries[0][2], 4, "tradingYield",
                                                           "hyperliquid:month", "", "data:x")
     assert "0x" + fh.hex() == h
+
+
+# ── trade-by-trade Modified Dietz ────────────────────────────────────────────
+
+def test_modified_dietz_with_weighted_cash_flow():
+    # V0 = $10,000 at t = 0
+    # Deposit $5,000 at t = 50 (weight 0.5 over [0, 100])
+    # V1 = $16,000 at t = 100
+    # Gain = 16,000 - 10,000 - 5,000 = $1,000
+    # Average capital = 10,000 + 0.5 * 5,000 = $12,500
+    # Dietz return = 1,000 / 12,500 = 0.08 (8.00%)
+    cfs = [metrics.CashFlow(t_ms=50_000, amount=Decimal(5000))]
+    out = metrics.compute_modified_dietz(
+        v_start=Decimal(10000),
+        v_end=Decimal(16000),
+        t_start_ms=0,
+        t_end_ms=100_000,
+        cash_flows=cfs,
+    )
+    assert Decimal(out["modifiedDietzReturn"]) == pytest.approx(Decimal("0.08"))
+    assert Decimal(out["netExternalFlows"]) == Decimal(5000)
+    assert Decimal(out["averageCapital"]) == Decimal(12500)
+    assert Decimal(out["investmentGain"]) == Decimal(1000)
+
+
+def test_modified_dietz_with_trade_fills_and_moments():
+    fills = [
+        metrics.TradeFill(t_ms=10_000, coin="ETH", px=Decimal(2500), sz=Decimal(2), side="B", closed_pnl=Decimal(150), fee=Decimal(5)),
+        metrics.TradeFill(t_ms=30_000, coin="BTC", px=Decimal(65000), sz=Decimal("0.1"), side="A", closed_pnl=Decimal(200), fee=Decimal(10)),
+        metrics.TradeFill(t_ms=60_000, coin="SOL", px=Decimal(150), sz=Decimal(10), side="B", closed_pnl=Decimal(-50), fee=Decimal(2)),
+    ]
+    out = metrics.compute_modified_dietz(
+        v_start=Decimal(20000),
+        v_end=Decimal(20283),
+        t_start_ms=0,
+        t_end_ms=86_400_000, # 1 day
+        cash_flows=[],
+        fills=fills,
+    )
+    assert out["tradesCount"] == 3
+    # Volume: (2500*2) + (65000*0.1) + (150*10) = 5000 + 6500 + 1500 = 13000
+    assert Decimal(out["totalVolumeUsd"]) == Decimal(13000)
+    assert Decimal(out["totalFeesUsd"]) == Decimal(17)
+    # Realized: 150 + 200 - 50 = 300
+    assert Decimal(out["realizedPnlUsd"]) == Decimal(300)
+    # Net trade PnL: 300 - 17 = 283
+    assert Decimal(out["netTradePnlUsd"]) == Decimal(283)
+    # Wins: 2 / 3
+    assert Decimal(out["winRate"]) == pytest.approx(Decimal("0.6666666667"))
+    assert Decimal(out["tradeSharpeRatio"]) > Decimal(0)
+    assert Decimal(out["tradeProbabilisticSharpeRatio"]) > Decimal("0.5")
+    assert Decimal(out["tradeDeflatedSharpeRatio"]) > Decimal(0)
+

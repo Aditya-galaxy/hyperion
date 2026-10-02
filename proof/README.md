@@ -93,7 +93,9 @@ Numbers are computed with 50-digit Decimals and reported to 10 places.
 - **The inputs are what the API returned, as the validator saw them.** The
   file records what was fetched and when. Anyone can spot-check the
   historical points against Hyperliquid's API while they're still in its
-  window. Proving the response itself (with zkTLS or a TEE) is the next step.
+  window. Proving the response itself with MPC-TLS (e.g. TLSNotary / Reclaim) or
+  TEEs is on the roadmap; the codebase provides a notary-signed attestation
+  prototype in `hyperion_proof.notary_attestation` in the interim.
 - **Deposits inside an interval.** A deposit mid-interval isn't in that
   interval's starting value, which slightly overstates its return.
   Hyperliquid's own ledger of deposits and withdrawals would allow a
