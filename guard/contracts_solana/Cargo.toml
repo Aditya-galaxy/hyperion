@@ -1,10 +1,30 @@
 [package]
 name = "hyperion-solana-vault"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "Hyperion Guarded Vault: Solana on-chain dual-signer execution vault enforcing Guard co-signatures and circuit breakers."
+description = "Hyperion Guarded Vault: a Solana program where every agent action needs the Hyperion Guard's co-signature"
+license = "MIT"
+publish = false
 
 [lib]
 crate-type = ["cdylib", "lib"]
 
+[features]
+no-entrypoint = []
+
 [dependencies]
+solana-program = "4"
+solana-system-interface = { version = "3.3", features = ["bincode"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
+
+[dev-dependencies]
+# Pinned to the generation LiteSVM 0.17 is built on, so the types line up.
+litesvm = "0.17"
+solana-instruction = "3"
+solana-keypair = "3"
+solana-message = "4"
+solana-pubkey = "3"
+solana-signer = "3"
+solana-transaction = { version = "4", features = ["blake3"] }
