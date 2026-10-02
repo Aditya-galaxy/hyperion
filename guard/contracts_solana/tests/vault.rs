@@ -313,3 +313,15 @@ fn owner_execute_works_even_when_killed() {
     };
     assert_eq!(w.send(agent_as_owner, &[&w.agent.insecure_clone()]), Err(Some(NOT_OWNER)));
 }
+
+/// A fixed vector for the Python client (guard/service tests): the vault PDA
+/// for known program, owner and agent keys. If this changes, so must the client.
+#[test]
+fn pda_vector_shared_with_the_python_client() {
+    let program = Pubkey::new_from_array([7; 32]);
+    let owner = Pubkey::new_from_array([1; 32]);
+    let agent = Pubkey::new_from_array([3; 32]);
+    let (pda, bump) = Pubkey::find_program_address(&[SEED, owner.as_ref(), agent.as_ref()], &program);
+    assert_eq!(pda.to_string(), "7nBk9JTMcododJyarAbXMD5p5MHNr6xPJd1sWdTCeKcq");
+    assert_eq!(bump, 250);
+}

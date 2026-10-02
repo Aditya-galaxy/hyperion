@@ -24,7 +24,7 @@ POLICY_DOMAIN = b"hyperion-guard/solana/policy/v2:"
 
 def policy_message(*, agent_id: str, owner: str, guardian: str, max_order_notional_usd: float,
                    max_slippage_bps: int, policy_version: int, nonce: int, require_guard_signer: bool,
-                   allowed_programs: list[str] | set[str] | None) -> bytes:
+                   allowed_programs: list[str] | set[str] | None, vault_address: str = "") -> bytes:
     body = {
         "agent_id": agent_id,
         "owner": owner,
@@ -35,6 +35,7 @@ def policy_message(*, agent_id: str, owner: str, guardian: str, max_order_notion
         "nonce": int(nonce),
         "require_guard_signer": bool(require_guard_signer),
         "allowed_programs": sorted(allowed_programs) if allowed_programs else None,
+        "vault_address": vault_address,
     }
     return POLICY_DOMAIN + json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
 

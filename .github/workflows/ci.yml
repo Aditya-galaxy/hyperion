@@ -158,3 +158,16 @@ jobs:
     # Unit tests on the host, then the compiled program in LiteSVM.
     - name: Test
       run: cargo test
+
+    # The Python client and the Guard against the compiled program: transactions
+    # built in Python, co-signed by the Guard, executed in LiteSVM (solders).
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Guard + vault end to end
+      working-directory: .
+      run: |
+        pip install -e "guard/service[test]" "solders==0.29.0"
+        pytest guard/service/tests/test_solana_vault_e2e.py -q

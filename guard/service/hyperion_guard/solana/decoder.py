@@ -178,6 +178,30 @@ def decode_system_instruction(data: bytes, accounts: list[str]) -> tuple[str, in
 
     return "SYSTEM_INSTRUCTION", None, None, None, {}
 
+def program_label(prog_id: str) -> str:
+    from .vault import VAULT_PROGRAM_IDS
+    if prog_id in VAULT_PROGRAM_IDS:
+        return "Hyperion Guarded Vault"
+    return ALLOWLISTED_PROGRAMS.get(prog_id, "Unknown External Program")
+
+
+def decode_instruction_for_program(prog_id: str, inst_data: bytes, inst_accounts: list[str]):
+    """Decode one instruction for whichever program it targets. Used for
+    top-level instructions and for the call inside a vault Execute."""
+    from .vault import VAULT_PROGRAM_IDS, decode_vault_instruction
+    if prog_id == JUPITER_V6_PROGRAM_ID:
+        return decode_jupiter_instruction(inst_data, inst_accounts)
+    if prog_id == PHOENIX_PROGRAM_ID:
+        return decode_phoenix_instruction(inst_data, inst_accounts)
+    if prog_id == SPL_TOKEN_PROGRAM_ID:
+        return decode_spl_token_instruction(inst_data, inst_accounts)
+    if prog_id == SYSTEM_PROGRAM_ID:
+        return decode_system_instruction(inst_data, inst_accounts)
+    if prog_id in VAULT_PROGRAM_IDS:
+        return decode_vault_instruction(inst_data, inst_accounts)
+    return "EXTERNAL_CALL", None, None, None, {"data_len": len(inst_data)}
+
+
 def decode_solana_transaction(raw_bytes: bytes) -> DecodedSolanaTransaction:
     """
     Parses a wire-format Solana transaction (Legacy or Versioned v0).
@@ -244,17 +268,8 @@ def decode_solana_transaction(raw_bytes: bytes) -> DecodedSolanaTransaction:
         msg_offset += data_len
 
         # Program-specific decoding
-        prog_label = ALLOWLISTED_PROGRAMS.get(prog_id, "Unknown External Program")
-        if prog_id == JUPITER_V6_PROGRAM_ID:
-            op, in_amt, min_out, slip, det = decode_jupiter_instruction(inst_data, inst_accounts)
-        elif prog_id == PHOENIX_PROGRAM_ID:
-            op, in_amt, min_out, slip, det = decode_phoenix_instruction(inst_data, inst_accounts)
-        elif prog_id == SPL_TOKEN_PROGRAM_ID:
-            op, in_amt, min_out, slip, det = decode_spl_token_instruction(inst_data, inst_accounts)
-        elif prog_id == SYSTEM_PROGRAM_ID:
-            op, in_amt, min_out, slip, det = decode_system_instruction(inst_data, inst_accounts)
-        else:
-            op, in_amt, min_out, slip, det = "EXTERNAL_CALL", None, None, None, {"data_len": len(inst_data)}
+        prog_label = program_label(prog_id)
+        op, in_amt, min_out, slip, det = decode_instruction_for_program(prog_id, inst_data, inst_accounts)
 
         instructions.append(DecodedInstruction(
             program_id=prog_id,
