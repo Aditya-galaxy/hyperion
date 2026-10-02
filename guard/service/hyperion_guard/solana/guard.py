@@ -40,6 +40,7 @@ class SolanaAgentPolicy:
     is_killed: bool = False
     policy_version: int = 1
     require_guard_signer: bool = True # Forces Guard to be a required signer in tx
+    vault_address: str = ""           # if set, vault instructions must use this vault
     allowed_programs: list[str] = field(default_factory=lambda: list(ALLOWLISTED_PROGRAMS.keys()))
 
 @dataclass
@@ -216,6 +217,34 @@ class SolanaGuardEngine:
         for inst in decoded.instructions:
             operations.append(f"{inst.program_label}::{inst.operation}")
 
+            # Check A0: vault instructions. Only the agent's own actions are co-signable,
+            # only from the agent's vault, and the call inside Execute is held to the
+            # same allow-list as a direct call.
+            reject = None
+            if inst.operation.startswith("VAULT_ADMIN_"):
+                reject = ("REJECTED_VAULT_ADMIN_OPERATION",
+                          (f"{inst.details.get('vault_instruction')} is for the vault's owner or guardian, "
+                           "not something the Guard co-signs for an agent"))
+            elif inst.operation.startswith("VAULT_") and policy.vault_address \
+                    and inst.details.get("vault") != policy.vault_address:
+                reject = ("REJECTED_WRONG_VAULT",
+                          f"vault {inst.details.get('vault')} isn't this agent's vault {policy.vault_address}")
+            elif inst.operation == "VAULT_EXECUTE" and inst.details.get("inner_program") not in policy.allowed_programs:
+                reject = ("REJECTED_UNAUTHORIZED_PROGRAM",
+                          f"vault call targets '{inst.details.get('inner_program')}', which is not in the policy allowlist")
+            if reject:
+                return SolanaVerdict(
+                    approved=False,
+                    status=reject[0],
+                    agent_id=agent_id,
+                    recent_blockhash=decoded.recent_blockhash,
+                    evaluated_at_ns=now_ns,
+                    cosigner_pubkey=self.cosigner_pubkey_b58,
+                    cosigner_signature_b58=None,
+                    decoded_operations=operations,
+                    violation_details=reject[1],
+                )
+
             # Check A: Program Allowlist
             if inst.program_id not in policy.allowed_programs:
                 return SolanaVerdict(
@@ -262,12 +291,15 @@ class SolanaGuardEngine:
                     violation_details=f"Slippage tolerance {inst.slippage_bps} bps exceeds max limit of {policy.max_slippage_bps} bps"
                 )
 
-            # Check C: Notional Size Estimation
-            if inst.operation in ("JUPITER_SWAP", "PHOENIX_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED") and inst.input_amount is not None:
+            # Check C: Notional Size Estimation (a vault Execute counts as its inner call)
+            kind = inst.details.get("inner_operation") if inst.operation == "VAULT_EXECUTE" else inst.operation
+            if kind == "VAULT_TRANSFER_SOL":
+                kind = "SOL_TRANSFER"
+            if kind in ("JUPITER_SWAP", "PHOENIX_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED") and inst.input_amount is not None:
                 # Assume 6 decimals (standard for USDC on Solana)
                 est_usd = float(inst.input_amount) / 1e6
                 total_estimated_usd += est_usd
-            elif inst.operation == "SOL_TRANSFER" and inst.input_amount is not None:
+            elif kind == "SOL_TRANSFER" and inst.input_amount is not None:
                 # Lamports (9 decimals) * sol_price_usd
                 est_usd = (float(inst.input_amount) / 1e9) * sol_price_usd
                 total_estimated_usd += est_usd

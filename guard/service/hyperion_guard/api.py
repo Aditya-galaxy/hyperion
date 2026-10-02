@@ -26,6 +26,7 @@ from fastapi import Body, FastAPI, HTTPException
 from .engine import ExecutorCall, Guard, GuardUnavailable, parse_order
 from .solana import SolanaAgentPolicy, SolanaGuardEngine, b58decode
 from .solana.control import action_message, policy_message
+from .solana.decoder import ALLOWLISTED_PROGRAMS
 
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 HEX = re.compile(r"^0x([0-9a-fA-F]{2})*$")
@@ -145,6 +146,7 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         nonce = int(body.get("nonce", 0))
         require_guard = bool(body.get("require_guard_signer", True))
         allowed = body.get("allowed_programs")
+        vault_address = str(body.get("vault_address", ""))
 
         # Owner Ed25519 Signature Verification
         owner_sig = body.get("signature_b58")
@@ -155,7 +157,7 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         msg = policy_message(agent_id=agent_id, owner=owner_pubkey, guardian=guardian_pubkey,
                              max_order_notional_usd=max_notional, max_slippage_bps=max_slippage,
                              policy_version=policy_version, nonce=nonce, require_guard_signer=require_guard,
-                             allowed_programs=allowed)
+                             allowed_programs=allowed, vault_address=vault_address)
         if not _verify_ed25519_sig(owner_pubkey, msg, owner_sig):
             raise HTTPException(401, "Invalid owner signature for policy update")
 
@@ -177,7 +179,8 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
             max_slippage_bps=max_slippage,
             policy_version=policy_version,
             require_guard_signer=require_guard,
-            allowed_programs=set(allowed) if allowed else None,
+            allowed_programs=set(allowed) if allowed else set(ALLOWLISTED_PROGRAMS),  # never None
+            vault_address=vault_address,
         )
         solana_guard.set_policy(policy)
         return {
