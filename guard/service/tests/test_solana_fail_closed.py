@@ -18,6 +18,8 @@ from hyperion_guard.solana.decoder import (
     PHOENIX_PROGRAM_ID,
     SPL_TOKEN_PROGRAM_ID,
     SYSTEM_PROGRAM_ID,
+    USDC_MINT,
+    associated_token_address,
     decode_phoenix_instruction,
 )
 from hyperion_guard.solana.guard import SolanaAgentPolicy, SolanaGuardEngine
@@ -51,11 +53,16 @@ def judge():
     def run(*calls: tuple[str, bytes], through_vault: bool = False):
         ixs = []
         for program, data in calls:
+            payer = vault if through_vault else agent
+            metas = [v.AccountMeta(payer, True, True)]
+            if program == SPL_TOKEN_PROGRAM_ID and data[:1] == b"\x03":
+                # Transfer [source, destination, authority], spending the payer's USDC
+                metas = [v.AccountMeta(associated_token_address(payer, USDC_MINT), False, True),
+                         v.AccountMeta(b58encode(os.urandom(32)), False, True), v.AccountMeta(payer, True, False)]
             if through_vault:
-                inner = v.Ix(program, [v.AccountMeta(vault, True, True)], data)
-                ixs.append(v.execute(VAULT_PID, vault, agent, guard.pubkey_b58, inner))
+                ixs.append(v.execute(VAULT_PID, vault, agent, guard.pubkey_b58, v.Ix(program, metas, data)))
             else:
-                ixs.append(v.Ix(program, [v.AccountMeta(agent, True, True),
+                ixs.append(v.Ix(program, [*metas, v.AccountMeta(agent, True, True),
                                           v.AccountMeta(guard.pubkey_b58, True, False)], data))
         msg, keys, n = compile_message(ixs, agent, b58encode(os.urandom(32)))
         return guard.evaluate_transaction("a", serialize(msg, keys, n, {agent: sign(msg, agent_key)}),

@@ -26,6 +26,7 @@ from hyperion_guard.solana import (
     decode_solana_transaction,
 )
 from hyperion_guard.solana.control import policy_message
+from hyperion_guard.solana.decoder import USDC_MINT, associated_token_address
 
 
 def build_jupiter_ix_data(
@@ -62,21 +63,24 @@ def build_mock_solana_tx(
             for _ in range(sig_count):
                 raw.extend(b"\x00" * 64)
 
-            # Message Header (2 required signers, 0 readonly signed, 1 readonly unsigned)
-            msg = bytearray([2, 0, 1])
-            # Account keys: [agent_pubkey, guard_pubkey, prog_pubkey]
-            msg.append(3)
+            # Message Header (2 required signers, 0 readonly signed, 2 readonly unsigned)
+            msg = bytearray([2, 0, 2])
+            # Account keys: [agent_pubkey, guard_pubkey, the agent's USDC token account, prog_pubkey]
+            msg.append(4)
             msg.extend(agent_pubkey)
             msg.extend(guard_pubkey)
+            msg.extend(b58decode(associated_token_address(agent_pubkey_b58, USDC_MINT)))
             msg.extend(prog_pubkey)
 
             msg.extend(blockhash)
 
-            # 1 instruction calling prog_pubkey (account index 2)
+            # 1 instruction calling prog_pubkey (account index 3). Its accounts follow
+            # Jupiter's `route`: [token program, transfer authority, source token account],
+            # so the swap spends the agent's USDC.
             msg.append(1)  # 1 instruction
-            msg.append(2)  # program_id index 2
-            msg.append(1)  # 1 account
-            msg.append(0)  # account index 0 (agent)
+            msg.append(3)  # program_id index 3
+            msg.append(3)  # 3 accounts
+            msg.extend([0, 0, 2])
         else:
             # Guard included but NOT marked as required signer (only 1 signer)
             sig_count = num_signatures if num_signatures is not None else 1

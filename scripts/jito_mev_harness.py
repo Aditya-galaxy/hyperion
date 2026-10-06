@@ -47,6 +47,7 @@ from hyperion_guard.solana import (
     SolanaGuardEngine,
     b58decode,
 )
+from hyperion_guard.solana.decoder import USDC_MINT, associated_token_address
 
 # Standard Jito Tip Accounts on Solana Mainnet
 JITO_TIP_ACCOUNT = "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5"
@@ -258,20 +259,23 @@ def build_jupiter_swap_tx(
         raw = bytearray([2])  # 2 signature slots
         raw.extend(b"\x00" * 128)
 
-        # Message header: 2 required signers, 0 readonly signed, 1 readonly unsigned
-        msg = bytearray([2, 0, 1])
-        # 3 accounts: [Agent, Guard, JupiterProgram]
-        msg.append(3)
+        # Message header: 2 required signers, 0 readonly signed, 2 readonly unsigned
+        msg = bytearray([2, 0, 2])
+        # 4 accounts: [Agent, Guard, the agent's USDC token account, JupiterProgram]
+        msg.append(4)
         msg.extend(agent_pubkey)
         msg.extend(guard_pubkey)
+        msg.extend(b58decode(associated_token_address(agent_pubkey_b58, USDC_MINT)))
         msg.extend(prog_pubkey)
         msg.extend(blockhash)
 
-        # 1 Instruction: program index 2, 1 account (index 0), followed by data
+        # 1 Instruction: program index 3; accounts as Jupiter's `route` lays them out,
+        # [token program, transfer authority, source token account], so the Guard can
+        # tell the swap spends the agent's USDC
         msg.append(1)
-        msg.append(2)  # program index 2
-        msg.append(1)
-        msg.append(0)
+        msg.append(3)  # program index 3
+        msg.append(3)
+        msg.extend([0, 0, 2])
     else:
         raw = bytearray([1])  # 1 signature slot
         raw.extend(b"\x00" * 64)

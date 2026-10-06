@@ -17,7 +17,9 @@ evaluates real on-chain intent rather than unverified agent declarations.
 from __future__ import annotations
 
 import struct
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
 from .base58 import b58encode
@@ -40,6 +42,14 @@ USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
 # here; the placeholder keeps every other account at its real position.
 UNRESOLVED_ACCOUNT = "<address-lookup-table>"
 
+# The tokens the Guard can put a dollar figure on: the two dollar stablecoins
+# (6 decimals, taken at $1) and wrapped SOL (9 decimals, at the SOL price).
+PRICED_MINTS = (USDC_MINT, USDT_MINT, WSOL_MINT)
+
+# Given a lookup table's address and the highest index a transaction uses in
+# it, return the table's addresses in order (or None if it can't be read).
+LookupTables = Callable[[str, int], Sequence[str] | None]
+
 TOKEN_ACCOUNT_RENT_LAMPORTS = 2_039_280      # rent-exempt minimum for a 165-byte token account
 MAX_COMPUTE_UNITS = 1_400_000
 
@@ -52,6 +62,41 @@ ALLOWLISTED_PROGRAMS = {
     COMPUTE_BUDGET_PROGRAM_ID: "Compute Budget",
     ASSOCIATED_TOKEN_PROGRAM_ID: "Associated Token Account",
 }
+
+@lru_cache(maxsize=4096)
+def associated_token_address(owner: str, mint: str) -> str:
+    """The owner's associated token account for `mint` (classic token program)."""
+    from .base58 import b58decode
+    from .vault import find_program_address
+    return find_program_address([b58decode(owner), b58decode(SPL_TOKEN_PROGRAM_ID), b58decode(mint)],
+                                ASSOCIATED_TOKEN_PROGRAM_ID)[0]
+
+
+def _at(accounts: list[str], i: int | None) -> str | None:
+    """The account at position i (negative counts from the end), if it's there and known."""
+    if i is None or not -len(accounts) <= i < len(accounts) or accounts[i] == UNRESOLVED_ACCOUNT:
+        return None
+    return accounts[i]
+
+
+def source_mint(accounts: list[str], mint_at: int | None, owner_at: int | None, token_account_at: int | None) -> str | None:
+    """Which token an instruction spends. Read from the accounts where the
+    instruction names its mint; otherwise worked out, for the tokens the Guard
+    can price, by checking whether the token account being spent is the
+    owner's associated token account for one of them. None if neither works."""
+    mint = _at(accounts, mint_at)
+    if mint:
+        return mint
+    owner, token_account = _at(accounts, owner_at), _at(accounts, token_account_at)
+    if owner and token_account:
+        try:
+            for candidate in PRICED_MINTS:
+                if associated_token_address(owner, candidate) == token_account:
+                    return candidate
+        except ValueError:
+            return None
+    return None
+
 
 @dataclass
 class DecodedInstruction:
@@ -73,6 +118,8 @@ class DecodedSolanaTransaction:
     instructions: list[DecodedInstruction]
     is_versioned: bool
     num_required_signatures: int
+    lookup_tables: list[str] = field(default_factory=list)      # address lookup tables a v0 transaction uses
+    unresolved_accounts: int = 0                                # accounts from those tables left unknown
 
 def read_compact_u16(data: bytes, offset: int) -> tuple[int, int]:
     """Reads a Solana compact-u16 integer and returns (value, new_offset)."""
@@ -91,26 +138,27 @@ def read_compact_u16(data: bytes, offset: int) -> tuple[int, int]:
 # Published Jupiter V6 Anchor Instruction Discriminators (sha256("global:<name>")[:8])
 # Jupiter V6 swap instructions, from the program's on-chain Anchor IDL
 # (discriminator = sha256("global:<name>")[:8]). For each: its name, where the
-# fixed fields sit, whether the first amount is the exact output, and the
-# position of source_mint among the accounts (None where the instruction
-# doesn't carry it).
+# fixed fields sit, whether the first amount is the exact output, and where
+# among the accounts to find what it spends.
 #
 #   "tail":   route plan first, then  amount u64, quoted u64, slippage_bps u16, platform_fee_bps u8
 #   "ledger": route plan first, then  quoted_out u64, slippage_bps u16, platform_fee_bps u8.
 #             The input comes from a token ledger account, so it can't be sized.
 #   "head":   [id u8 for the shared forms] amount u64, quoted u64, slippage_bps u16,
 #             platform_fee_bps u16, positive_slippage_bps u16, then the route plan
-JUPITER_ROUTES: dict[str, tuple[str, str, bool, int | None]] = {
-    "e517cb977ae3ad2a": ("route", "tail", False, None),
-    "c1209b3341d69c81": ("sharedAccountsRoute", "tail", False, 7),
-    "d033ef977b2bed5c": ("exactOutRoute", "tail", True, 5),
-    "b0d169a89a7d453e": ("sharedAccountsExactOutRoute", "tail", True, 7),
-    "96564774a75d0e68": ("routeWithTokenLedger", "ledger", False, None),
-    "e6798f50779f6aaa": ("sharedAccountsRouteWithTokenLedger", "ledger", False, 7),
-    "bb64facc31c4af14": ("routeV2", "head", False, 3),
-    "9d8ab85215f4f324": ("exactOutRouteV2", "head", True, 3),
-    "d19853937cfed8e9": ("sharedAccountsRouteV2", "head", False, 6),
-    "3560e5cad8bbfa18": ("sharedAccountsExactOutRouteV2", "head", True, 6),
+JUPITER_ROUTES: dict[str, tuple[str, str, bool, int | None, int, int]] = {
+    # name, layout, exact out, then positions among the accounts of:
+    # source_mint (None if not carried), the transfer authority, the token account spent
+    "e517cb977ae3ad2a": ("route", "tail", False, None, 1, 2),
+    "c1209b3341d69c81": ("sharedAccountsRoute", "tail", False, 7, 2, 3),
+    "d033ef977b2bed5c": ("exactOutRoute", "tail", True, 5, 1, 2),
+    "b0d169a89a7d453e": ("sharedAccountsExactOutRoute", "tail", True, 7, 2, 3),
+    "96564774a75d0e68": ("routeWithTokenLedger", "ledger", False, None, 1, 2),
+    "e6798f50779f6aaa": ("sharedAccountsRouteWithTokenLedger", "ledger", False, 7, 2, 3),
+    "bb64facc31c4af14": ("routeV2", "head", False, 3, 0, 1),
+    "9d8ab85215f4f324": ("exactOutRouteV2", "head", True, 3, 0, 1),
+    "d19853937cfed8e9": ("sharedAccountsRouteV2", "head", False, 6, 1, 2),
+    "3560e5cad8bbfa18": ("sharedAccountsExactOutRouteV2", "head", True, 6, 1, 2),
 }
 JUPITER_DISCRIMINATORS: dict[str, str] = {disc: route[0] for disc, route in JUPITER_ROUTES.items()}
 
@@ -129,10 +177,11 @@ def decode_jupiter_instruction(data: bytes, accounts: list[str]) -> tuple[str, i
     route = JUPITER_ROUTES.get(discriminator)
     if route is None:
         return "UNKNOWN_JUPITER", None, None, None, {"discriminator": discriminator, "error": f"unrecognized Jupiter discriminator {discriminator}"}
-    route_name, layout, exact_out, mint_at = route
+    route_name, layout, exact_out, mint_at, owner_at, token_account_at = route
     details: dict[str, Any] = {"instruction_name": route_name, "discriminator": discriminator}
-    if mint_at is not None and mint_at < len(accounts) and accounts[mint_at] != UNRESOLVED_ACCOUNT:
-        details["source_mint"] = accounts[mint_at]
+    mint = source_mint(accounts, mint_at, owner_at, token_account_at)
+    if mint:
+        details["source_mint"] = mint
 
     try:
         if layout == "ledger":
@@ -258,6 +307,10 @@ def decode_raydium_instruction(data: bytes, accounts: list[str]) -> tuple[str, i
         in_amount, out_amount, unbounded = first, second, first == 0xFFFF_FFFF_FFFF_FFFF
     details: dict[str, Any] = {"instruction_name": name, "in_amount_raw": in_amount, "out_amount_raw": out_amount,
                                "exact": "in" if "BaseIn" in name else "out", "unbounded": unbounded}
+    # every swap form ends: user source token account, user destination token account, user owner
+    mint = source_mint(accounts, None, -1, -3) if len(accounts) >= 8 else None
+    if mint:
+        details["source_mint"] = mint
     return "RAYDIUM_SWAP", in_amount, out_amount, None, details
 
 
@@ -282,11 +335,19 @@ def decode_spl_token_instruction(data: bytes, accounts: list[str]) -> tuple[str,
     ins_type = data[0]
     if ins_type == 3 and len(data) >= 9: # Transfer
         amount = struct.unpack_from("<Q", data, 1)[0]
-        return "TOKEN_TRANSFER", amount, None, None, {"type": "Transfer", "amount": amount}
+        details: dict[str, Any] = {"type": "Transfer", "amount": amount}
+        mint = source_mint(accounts, None, 2, 0) if len(accounts) >= 3 else None       # [source, destination, authority]
+        if mint:
+            details["source_mint"] = mint
+        return "TOKEN_TRANSFER", amount, None, None, details
     elif ins_type == 12 and len(data) >= 10: # TransferChecked
         amount = struct.unpack_from("<Q", data, 1)[0]
         decimals = data[9]
-        return "TOKEN_TRANSFER_CHECKED", amount, None, None, {"type": "TransferChecked", "amount": amount, "decimals": decimals}
+        details = {"type": "TransferChecked", "amount": amount, "decimals": decimals}
+        mint = source_mint(accounts, 1, 3, 0) if len(accounts) >= 4 else None          # [source, mint, destination, authority]
+        if mint:
+            details["source_mint"] = mint
+        return "TOKEN_TRANSFER_CHECKED", amount, None, None, details
 
     name = SPL_TOKEN_INSTRUCTIONS.get(ins_type, f"instruction {ins_type}")
     # CloseAccount [account, destination, authority]: the account's lamports (all of a
@@ -315,6 +376,15 @@ def decode_system_instruction(data: bytes, accounts: list[str]) -> tuple[str, in
     ins_type = struct.unpack_from("<I", data, 0)[0] if len(data) >= 4 else None
     if ins_type in (0, 2) and len(data) >= 12:
         lamports = struct.unpack_from("<Q", data, 4)[0]
+        # Transfer [from, to] into the sender's own wrapped-SOL account is a wrap: the
+        # SOL is still the sender's, and the swap that spends it is what gets sized.
+        sender, to = _at(accounts, 0), _at(accounts, 1)
+        if ins_type == 2 and sender and to:
+            try:
+                if associated_token_address(sender, WSOL_MINT) == to:
+                    return "SOL_WRAP", lamports, None, None, {"type": "Transfer (wrap)", "lamports": lamports}
+            except ValueError:
+                pass
         return "SOL_TRANSFER", lamports, None, None, {"type": SYSTEM_INSTRUCTIONS[ins_type], "lamports": lamports}
 
     return "SYSTEM_INSTRUCTION", None, None, None, {"type": SYSTEM_INSTRUCTIONS.get(ins_type, f"instruction {ins_type}")}
@@ -379,10 +449,15 @@ def decode_instruction_for_program(prog_id: str, inst_data: bytes, inst_accounts
     return "EXTERNAL_CALL", None, None, None, {"data_len": len(inst_data)}
 
 
-def decode_solana_transaction(raw_bytes: bytes) -> DecodedSolanaTransaction:
+def decode_solana_transaction(raw_bytes: bytes, lookup_tables: LookupTables | None = None) -> DecodedSolanaTransaction:
     """
     Parses a wire-format Solana transaction (Legacy or Versioned v0).
     Extracts the message, signatures, accounts, and decoded instructions.
+
+    A v0 transaction names most of its accounts by index into address lookup
+    tables. With `lookup_tables` those are resolved; without it, or for a
+    table or index it can't supply, the account is UNRESOLVED_ACCOUNT. Program
+    ids are never taken from a table, as on-chain.
     """
     if len(raw_bytes) < 65:
         raise ValueError("Transaction payload too short to be a valid Solana transaction")
@@ -423,26 +498,55 @@ def decode_solana_transaction(raw_bytes: bytes) -> DecodedSolanaTransaction:
     msg_offset += 32
     recent_blockhash = b58encode(blockhash_bytes)
 
-    # 6. Compiled Instructions
+    # 6. Compiled Instructions: program index, account indexes, data
     num_instructions, msg_offset = read_compact_u16(message_bytes, msg_offset)
-    instructions: list[DecodedInstruction] = []
-
+    compiled: list[tuple[int, list[int], bytes]] = []
     for _ in range(num_instructions):
         prog_id_idx = message_bytes[msg_offset]
         msg_offset += 1
-        prog_id = account_keys[prog_id_idx] if prog_id_idx < len(account_keys) else UNRESOLVED_ACCOUNT
-
         num_acc_idx, msg_offset = read_compact_u16(message_bytes, msg_offset)
-        inst_accounts = []
-        for _ in range(num_acc_idx):
-            acc_idx = message_bytes[msg_offset]
-            msg_offset += 1
-            # keep positions: an account from a lookup table is a placeholder, not a gap
-            inst_accounts.append(account_keys[acc_idx] if acc_idx < len(account_keys) else UNRESOLVED_ACCOUNT)
-
+        acc_idxs = list(message_bytes[msg_offset:msg_offset+num_acc_idx])
+        msg_offset += num_acc_idx
         data_len, msg_offset = read_compact_u16(message_bytes, msg_offset)
-        inst_data = message_bytes[msg_offset:msg_offset+data_len]
+        compiled.append((prog_id_idx, acc_idxs, message_bytes[msg_offset:msg_offset+data_len]))
         msg_offset += data_len
+
+    # 7. Address table lookups (v0). The full account list is the static keys, then
+    # every table's writable accounts, then every table's read-only accounts.
+    tables: list[str] = []
+    loaded_writable: list[str] = []
+    loaded_readonly: list[str] = []
+    if is_versioned and msg_offset < len(message_bytes):
+        num_lookups, msg_offset = read_compact_u16(message_bytes, msg_offset)
+        for _ in range(num_lookups):
+            table = b58encode(message_bytes[msg_offset:msg_offset+32])
+            msg_offset += 32
+            n_w, msg_offset = read_compact_u16(message_bytes, msg_offset)
+            writable = list(message_bytes[msg_offset:msg_offset+n_w])
+            msg_offset += n_w
+            n_r, msg_offset = read_compact_u16(message_bytes, msg_offset)
+            readonly = list(message_bytes[msg_offset:msg_offset+n_r])
+            msg_offset += n_r
+            tables.append(table)
+
+            addresses: Sequence[str] | None = None
+            if lookup_tables is not None and (writable or readonly):
+                try:
+                    addresses = lookup_tables(table, max(writable + readonly))
+                except (OSError, ValueError, LookupError):      # a table that can't be read leaves its accounts unknown
+                    addresses = None
+
+            def pick(i: int, addresses: Sequence[str] | None = addresses) -> str:
+                return addresses[i] if addresses is not None and i < len(addresses) else UNRESOLVED_ACCOUNT
+            loaded_writable += [pick(i) for i in writable]
+            loaded_readonly += [pick(i) for i in readonly]
+    all_keys = account_keys + loaded_writable + loaded_readonly
+
+    instructions: list[DecodedInstruction] = []
+    for prog_id_idx, acc_idxs, inst_data in compiled:
+        prog_id = account_keys[prog_id_idx] if prog_id_idx < len(account_keys) else UNRESOLVED_ACCOUNT
+        # keep positions: an account that can't be resolved is a placeholder, not a gap
+        inst_accounts = [all_keys[i] if i < len(all_keys) else UNRESOLVED_ACCOUNT for i in acc_idxs]
 
         # Program-specific decoding
         prog_label = program_label(prog_id)
@@ -467,4 +571,6 @@ def decode_solana_transaction(raw_bytes: bytes) -> DecodedSolanaTransaction:
         instructions=instructions,
         is_versioned=is_versioned,
         num_required_signatures=num_required_signatures,
+        lookup_tables=tables,
+        unresolved_accounts=(loaded_writable + loaded_readonly).count(UNRESOLVED_ACCOUNT),
     )

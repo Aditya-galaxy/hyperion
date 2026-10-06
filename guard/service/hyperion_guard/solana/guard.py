@@ -25,7 +25,10 @@ from .base58 import b58encode
 from .decoder import (
     ALLOWLISTED_PROGRAMS,
     MAX_COMPUTE_UNITS,
+    USDC_MINT,
+    USDT_MINT,
     WSOL_MINT,
+    LookupTables,
     decode_solana_transaction,
 )
 
@@ -33,7 +36,7 @@ from .decoder import (
 # grant nothing, and calls into programs the owner listed that it can't decode.
 CO_SIGNABLE = frozenset({
     "JUPITER_SWAP", "RAYDIUM_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED", "SOL_TRANSFER", "VAULT_TRANSFER_SOL",
-    "TOKEN_HARMLESS", "EXTERNAL_CALL", "COMPUTE_BUDGET", "ATA_CREATE",
+    "TOKEN_HARMLESS", "EXTERNAL_CALL", "COMPUTE_BUDGET", "ATA_CREATE", "SOL_WRAP",
 })
 
 
@@ -65,8 +68,14 @@ class SolanaVerdict:
     violation_details: str | None = None
 
 class SolanaGuardEngine:
-    def __init__(self, cosigner_private_key_bytes: bytes | None = None):
-        """Initializes the Guard engine with an Ed25519 co-signer keypair."""
+    def __init__(self, cosigner_private_key_bytes: bytes | None = None, lookup_tables: LookupTables | None = None):
+        """Initializes the Guard engine with an Ed25519 co-signer keypair.
+
+        `lookup_tables` resolves the address lookup tables v0 transactions use
+        (see lookup.RpcLookupTables). Without it, accounts named through a
+        table stay unknown, and a swap whose input token can't be told from
+        the rest of the transaction is refused."""
+        self.lookup_tables = lookup_tables
         if cosigner_private_key_bytes:
             self._key = ECC.import_key(cosigner_private_key_bytes)
         else:
@@ -165,7 +174,7 @@ class SolanaGuardEngine:
 
         # 2. Decode serialized transaction
         try:
-            decoded = decode_solana_transaction(raw_tx_bytes)
+            decoded = decode_solana_transaction(raw_tx_bytes, self.lookup_tables)
         except (ValueError, struct.error, KeyError, IndexError, TypeError) as e:
             return SolanaVerdict(
                 approved=False,
@@ -351,12 +360,32 @@ class SolanaGuardEngine:
             elif kind in ("SOL_TRANSFER", "ATA_CREATE") and inst.input_amount is not None:
                 # Lamports (9 decimals) * sol_price_usd
                 total_estimated_usd += (float(inst.input_amount) / 1e9) * sol_price_usd
-            elif kind == "JUPITER_SWAP" and what.get("source_mint") == WSOL_MINT:
-                # the swap spends wrapped SOL: lamports, not a 6-decimal token
-                total_estimated_usd += (float(inst.input_amount) / 1e9) * sol_price_usd
             elif kind in ("JUPITER_SWAP", "RAYDIUM_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED") and inst.input_amount is not None:
-                # Assume 6 decimals (standard for USDC on Solana)
-                total_estimated_usd += float(inst.input_amount) / 1e6
+                # A token amount is only a dollar figure if the Guard knows the token.
+                mint = what.get("source_mint")
+                if mint in (USDC_MINT, USDT_MINT):
+                    total_estimated_usd += float(inst.input_amount) / 1e6
+                elif mint == WSOL_MINT:
+                    total_estimated_usd += (float(inst.input_amount) / 1e9) * sol_price_usd
+                else:
+                    if mint:
+                        why = f"it spends token {mint}, which the Guard has no price for"
+                    else:
+                        why = "the token it spends couldn't be identified"
+                        if decoded.unresolved_accounts:
+                            why += (f" ({decoded.unresolved_accounts} of the transaction's accounts are in lookup "
+                                    "tables the Guard couldn't read)")
+                    return SolanaVerdict(
+                        approved=False,
+                        status="REJECTED_UNPRICED_TOKEN",
+                        agent_id=agent_id,
+                        recent_blockhash=decoded.recent_blockhash,
+                        evaluated_at_ns=now_ns,
+                        cosigner_pubkey=self.cosigner_pubkey_b58,
+                        cosigner_signature_b58=None,
+                        decoded_operations=operations,
+                        violation_details=f"{inst.program_label}: can't size this against the dollar caps, because {why}",
+                    )
 
         # Check C.1: the priority fee is SOL the agent spends too. With no limit set,
         # assume the most a transaction can use.
