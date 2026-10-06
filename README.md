@@ -41,7 +41,8 @@ the agent's owner set, and only then co-signs.
   refuses what it can't size. The vault is live on **devnet**:
   [`9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq`](https://explorer.solana.com/address/9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq?cluster=devnet).
   See [guard/contracts_solana](guard/contracts_solana/README.md), and run the
-  six-scene demo with `python guard/demo/solana_devnet.py`.
+  six-scene demo with `python guard/demo/solana_devnet.py`. A hosted Guard
+  for devnet runs at [https://hyperion-guard-dijsyl2kwq-uc.a.run.app](https://hyperion-guard-dijsyl2kwq-uc.a.run.app/docs).
 - **On Arc**, limits and the kill switch live in a contract, and a
   `GuardedExecutor` wallet only executes a call that carries a live approval.
   See [guard/README.md](guard/README.md); `bash guard/demo/local.sh` runs it

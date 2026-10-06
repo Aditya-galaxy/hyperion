@@ -145,6 +145,14 @@ The owner's signed policy names the agent's key, and the Guard judges only trans
 
 A transaction that doesn't name the Guard as a required signer, such as one taken as-is from Jupiter's swap API, is refused (`REJECTED_MISSING_GUARD_SIGNER`): the Guard's opinion of it couldn't be enforced. A policy can turn that requirement off to use the Guard as an advisory check only.
 
+The same flow runs against the hosted Guard over HTTP, with the owner's signed policy and the Guard's live SOL price:
+
+```bash
+HYPERION_GUARD_URL=https://hyperion-guard-dijsyl2kwq-uc.a.run.app python guard/demo/solana_devnet.py
+```
+
+**The Guard's state survives a restart.** Policies and kill switches, control-message nonces, the throttle and the day's spend, and the transactions already approved are written to a store (memory, a SQLite file, or Firestore) before a verdict leaves; if the write fails, nothing is approved. The co-signing key comes from a secret, not from start-up. The Guard is written for one running instance and answers one request at a time.
+
 The client is Python. There is no TypeScript client yet.
 
 ---
@@ -179,8 +187,8 @@ cd guard/service
 - 15 Rust High-Performance Quant Engine Tests (`cargo test`)
 - 15 Solana vault tests: 5 unit, 10 integration against the compiled program in LiteSVM (`cd guard/contracts_solana && cargo build-sbf && cargo test`)
 - 27 EVM Guard & Calldata Decoder Tests (`forge test`)
-- 229 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
-- **Total: 286 automated tests, all passing**
+- 253 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
+- **Total: 310 automated tests, all passing**
 
 ### Jito MEV & Sandwich Attack Simulation Benchmarks
 
@@ -196,7 +204,7 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 | **Median Guard Latency**| N/A | about **1 ms** to refuse, **1.2 ms** to approve and sign |
 
 > [!NOTE]
-> Measured on a laptop, in Python: a refusal takes a median of **0.96 ms** and an approval **1.21 ms**, under 0.5% of Solana's 400 ms slot. Nearly all of it is Ed25519: 0.9 ms to check the agent's signature and 0.3 ms to sign. Three things cost more, once each: the first transaction from a wallet (about 0.3 to 0.8 ms to work out its token accounts), and the first use of a lookup table, a token account or a token's price (prices again every 10 seconds), each a network call of roughly 0.2 to 1 s to a public endpoint.
+> Measured on a laptop, in Python: a refusal takes a median of **0.96 ms** and an approval **1.21 ms**, under 0.5% of Solana's 400 ms slot. Nearly all of it is Ed25519: 0.9 ms to check the agent's signature and 0.3 ms to sign. Three things cost more, once each: the first transaction from a wallet (about 0.3 to 0.8 ms to work out its token accounts), and the first use of a lookup table, a token account or a token's price (prices again every 10 seconds), each a network call of roughly 0.2 to 1 s to a public endpoint. On the hosted Guard an approval also waits for its record to be written to Firestore, and a request to the service takes about 0.4 s end to end from a laptop.
 
 ---
 
@@ -273,6 +281,7 @@ One terminal and one browser tab. No slides except the opening and closing cards
 - **GitHub Repository:** [https://github.com/Aditya-galaxy/hyperion](https://github.com/Aditya-galaxy/hyperion)
 - **Solana Guard Module:** [`guard/service/hyperion_guard/solana/`](guard/service/hyperion_guard/solana/)
 - **Solana Guarded Vault program, on devnet:** [`9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq`](https://explorer.solana.com/address/9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq?cluster=devnet); source in [`guard/contracts_solana/`](guard/contracts_solana/)
+- **Hosted Guard API (devnet, a demo):** [https://hyperion-guard-dijsyl2kwq-uc.a.run.app](https://hyperion-guard-dijsyl2kwq-uc.a.run.app/docs). Health: [`/v1/solana/health`](https://hyperion-guard-dijsyl2kwq-uc.a.run.app/v1/solana/health). Hosted with [`deploy_guard.sh`](deploy_guard.sh) on Cloud Run; state in Firestore, key in Secret Manager.
 - **Live devnet demo:** [`guard/demo/solana_devnet.py`](guard/demo/solana_devnet.py), six scenes, each a real transaction (links in section 7)
 - **Jito MEV Simulation Harness:** [`scripts/jito_mev_harness.py`](scripts/jito_mev_harness.py)
 - **Test Suite:** [`guard/service/tests/test_solana_guard.py`](guard/service/tests/test_solana_guard.py)

@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import hashlib
 import struct
+import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 
 from Crypto.PublicKey import ECC
 from Crypto.Signature import eddsa
@@ -34,6 +35,7 @@ from .decoder import (
     decode_solana_transaction,
 )
 from .prices import TokenPrices
+from .store import MemoryStore, StateStore
 
 # What the Guard will co-sign: instructions it can size, a few that move and
 # grant nothing, and calls into programs the owner listed that it can't decode.
@@ -90,7 +92,8 @@ def _signed_by(decoded, signer: str) -> bool:
 
 class SolanaGuardEngine:
     def __init__(self, cosigner_private_key_bytes: bytes | None = None, lookup_tables: LookupTables | None = None,
-                 prices: TokenPrices | None = None, token_accounts: TokenAccounts | None = None):
+                 prices: TokenPrices | None = None, token_accounts: TokenAccounts | None = None,
+                 store: StateStore | None = None):
         """Initializes the Guard engine with an Ed25519 co-signer keypair.
 
         `lookup_tables` resolves the address lookup tables v0 transactions use
@@ -106,9 +109,13 @@ class SolanaGuardEngine:
         # Says which mint a token account holds, for instructions that spend one without
         # naming its mint (see lookup.RpcTokenAccounts).
         self.token_accounts = token_accounts
-        if cosigner_private_key_bytes:
+        if cosigner_private_key_bytes and len(cosigner_private_key_bytes) == 32:
+            self._key = eddsa.import_private_key(cosigner_private_key_bytes)      # a raw Ed25519 seed
+        elif cosigner_private_key_bytes:
             self._key = ECC.import_key(cosigner_private_key_bytes)
         else:
+            # A key made up at start-up is gone at the next one, and every vault that named
+            # it as its Guard with it. Fine for tests and demos; a host passes its own.
             self._key = ECC.generate(curve="ed25519")
 
         # Extract 32-byte raw public key
@@ -116,20 +123,52 @@ class SolanaGuardEngine:
         self.cosigner_pubkey_b58 = b58encode(raw_pub)
         self._signer = eddsa.new(self._key, "rfc8032")
 
-        # Policies and tracking state
+        # One request at a time: the checks read the throttle and the caps and then
+        # write them, and two requests interleaved could both fit under a cap that
+        # only has room for one.
+        self._lock = threading.RLock()
+
+        # State. Every change is written through to `store` (see store.py) and read back
+        # here, so a restart forgets nothing. The default store is memory, which does.
+        self.store: StateStore = store if store is not None else MemoryStore()
         self.policies: dict[str, SolanaAgentPolicy] = {}
         self.daily_spend_tracker: dict[str, list[tuple[float, float]]] = {} # agent_id -> [(time_sec, usd)]
         self.order_timestamps: dict[str, list[float]] = {}                  # agent_id -> [time_sec]
         # Highest control-message nonce accepted per agent (policy, kill and revive share
-        # one sequence), so a signed message can never be replayed. In memory, like the rest
-        # of this engine's state: a restart forgets it, as it forgets the policies.
+        # one sequence), so a signed message can never be replayed.
         self.last_nonce: dict[str, int] = {}
         # Messages already approved, per agent: sha256(message) -> the signature given.
         # Asking again about the same transaction gets the same answer and isn't counted
         # again. A broadcast transaction is public, so without this anyone could resubmit
-        # it to use up the agent's rate limit and daily cap. Kept for the life of the
-        # process: it only grows with transactions the agent itself signed.
+        # it to use up the agent's rate limit and daily cap. It only grows with
+        # transactions the agent itself signed. Read from the store as they're asked about.
         self.approved_messages: dict[str, dict[bytes, str]] = {}
+        self._load()
+
+    def _load(self) -> None:
+        for agent_id, saved in self.store.items("policy"):
+            self.policies[agent_id] = SolanaAgentPolicy(**saved)
+        for agent_id, saved in self.store.items("nonce"):
+            self.last_nonce[agent_id] = int(saved["nonce"])
+        for agent_id, saved in self.store.items("usage"):
+            self.order_timestamps[agent_id] = [float(t) for t in saved["orders"]]
+            self.daily_spend_tracker[agent_id] = [(float(t), float(usd)) for t, usd in saved["spends"]]
+
+    @staticmethod
+    def _policy_record(policy: SolanaAgentPolicy) -> tuple[str, str, dict]:
+        saved = asdict(policy)
+        saved["allowed_programs"] = sorted(saved["allowed_programs"])       # a set isn't JSON
+        return "policy", policy.agent_id, saved
+
+    def _approved(self, agent_id: str, message_hash: bytes) -> str | None:
+        """The signature already given for this message, from memory or the store."""
+        known = self.approved_messages.setdefault(agent_id, {})
+        if message_hash not in known:
+            saved = self.store.get("approved", f"{agent_id}:{message_hash.hex()}")
+            if saved is None:
+                return None
+            known[message_hash] = saved["signature"]
+        return known[message_hash]
 
     @property
     def pubkey_b58(self) -> str:
@@ -139,35 +178,73 @@ class SolanaGuardEngine:
         """Retrieves policy for an agent if registered."""
         return self.policies.get(agent_id)
 
-    def set_policy(self, policy: SolanaAgentPolicy):
-        """Registers or updates policy for an agent."""
-        self.policies[policy.agent_id] = policy
+    def set_policy(self, policy: SolanaAgentPolicy, nonce: int | None = None) -> bool:
+        """Registers or updates policy for an agent. With `nonce`, the nonce is
+        consumed and the policy saved together, or neither is: returns False,
+        changing nothing, if the nonce isn't above the last one accepted."""
+        with self._lock:
+            records = [self._policy_record(policy)]
+            if nonce is not None:
+                if nonce <= self.last_nonce.get(policy.agent_id, 0):
+                    return False
+                records.append(("nonce", policy.agent_id, {"nonce": nonce}))
+            self.store.put_many(records)                    # saved first: if this fails, nothing changed
+            if nonce is not None:
+                self.last_nonce[policy.agent_id] = nonce
+            self.policies[policy.agent_id] = policy
+            return True
 
     def consume_nonce(self, agent_id: str, nonce: int) -> bool:
         """Accept `nonce` for `agent_id` only if it's above every nonce accepted
         before. Call after the signature checks out, before applying the action."""
-        if nonce <= self.last_nonce.get(agent_id, 0):
-            return False
-        self.last_nonce[agent_id] = nonce
-        return True
-
-    def kill_agent(self, agent_id: str, reason: str = "") -> bool:
-        """Emergency circuit breaker: trips kill switch."""
-        if agent_id not in self.policies:
-            # Register a default killed policy if agent was not yet registered
-            self.policies[agent_id] = SolanaAgentPolicy(agent_id=agent_id, owner_solana_pubkey="", is_killed=True)
+        with self._lock:
+            if nonce <= self.last_nonce.get(agent_id, 0):
+                return False
+            self.store.put_many([("nonce", agent_id, {"nonce": nonce})])
+            self.last_nonce[agent_id] = nonce
             return True
-        self.policies[agent_id].is_killed = True
-        return True
 
-    def revive_agent(self, agent_id: str) -> bool:
+    def _set_killed(self, agent_id: str, killed: bool, nonce: int | None) -> bool:
+        with self._lock:
+            policy = self.policies.get(agent_id)
+            if policy is None:
+                if not killed:
+                    return False
+                # Register a default killed policy if agent was not yet registered
+                policy = SolanaAgentPolicy(agent_id=agent_id, owner_solana_pubkey="")
+            if nonce is not None and nonce <= self.last_nonce.get(agent_id, 0):
+                return False
+            changed = replace(policy, is_killed=killed)
+            records = [self._policy_record(changed)]
+            if nonce is not None:
+                records.append(("nonce", agent_id, {"nonce": nonce}))
+            self.store.put_many(records)
+            if nonce is not None:
+                self.last_nonce[agent_id] = nonce
+            policy.is_killed = killed
+            self.policies[agent_id] = policy
+            return True
+
+    def kill_agent(self, agent_id: str, reason: str = "", nonce: int | None = None) -> bool:
+        """Emergency circuit breaker: trips kill switch. With `nonce`, the nonce
+        is consumed and the kill saved together (False if the nonce is stale)."""
+        return self._set_killed(agent_id, True, nonce)
+
+    def revive_agent(self, agent_id: str, nonce: int | None = None) -> bool:
         """Owner revival: restores execution."""
-        if agent_id in self.policies:
-            self.policies[agent_id].is_killed = False
-            return True
-        return False
+        return self._set_killed(agent_id, False, nonce)
 
     def evaluate_transaction(
+        self,
+        agent_id: str,
+        raw_tx_bytes: bytes,
+        sol_price_usd: float | None = None,
+    ) -> SolanaVerdict:
+        """Judge a transaction, one at a time (see _lock)."""
+        with self._lock:
+            return self._evaluate(agent_id, raw_tx_bytes, sol_price_usd)
+
+    def _evaluate(
         self,
         agent_id: str,
         raw_tx_bytes: bytes,
@@ -245,7 +322,7 @@ class SolanaGuardEngine:
 
         # 2.2 Already approved: the same answer, not counted a second time.
         message_hash = hashlib.sha256(decoded.message_bytes).digest()
-        earlier = self.approved_messages.get(agent_id, {}).get(message_hash)
+        earlier = self._approved(agent_id, message_hash)
         if earlier is not None:
             return SolanaVerdict(
                 approved=True,
@@ -545,11 +622,16 @@ class SolanaGuardEngine:
         sig_bytes = self._signer.sign(decoded.message_bytes)
         sig_b58 = b58encode(sig_bytes)
 
-        # Update state trackers
+        # Record it, then answer. The record is saved before the signature leaves: if
+        # the save fails, this raises and nothing was approved.
         recent_orders.append(now_sec)
-        self.order_timestamps[agent_id] = recent_orders
-
         rolling_24h_spends.append((now_sec, total_estimated_usd))
+        self.store.put_many([
+            ("usage", agent_id, {"orders": recent_orders, "spends": rolling_24h_spends}),
+            ("approved", f"{agent_id}:{message_hash.hex()}", {"signature": sig_b58, "at": now_sec,
+                                                               "usd": total_estimated_usd}),
+        ])
+        self.order_timestamps[agent_id] = recent_orders
         self.daily_spend_tracker[agent_id] = rolling_24h_spends
         self.approved_messages.setdefault(agent_id, {})[message_hash] = sig_b58
 

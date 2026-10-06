@@ -58,8 +58,34 @@ transactions that key has signed, so nobody else can use up an agent's rate
 limit or daily cap. Asking twice about the same transaction returns the same
 signature and counts once.
 
-The Solana Guard keeps policies, nonces, the day's spend and its co-signing
-key in memory, so a restart forgets them.
+**A restart forgets nothing.** Policies and kill switches, control-message
+nonces, the throttle and the day's spend, and the transactions already
+approved are written through to a store
+([`solana/store.py`](service/hyperion_guard/solana/store.py)) before a
+verdict leaves, and read back at start. If the store can't be written, nothing
+is approved.
+
+| Setting | What it does |
+|---|---|
+| `HYPERION_SOLANA_STATE` | Where state lives: unset for memory, a path for a SQLite file, or `firestore` |
+| `HYPERION_SOLANA_COSIGNER_KEY` | The co-signing key, a 32-byte Ed25519 seed in hex. Unset, a key is made up at start and lost at the next |
+| `HYPERION_SOLANA_RPC_URL` | Lets the Guard read lookup tables and token accounts |
+| `HYPERION_SOLANA_PRICES` | `jupiter` for live prices of SOL and other tokens |
+| `HYPERION_VAULT_PROGRAM_ID` | The vault program(s) to recognise |
+| `HYPERION_SOLANA_MAX_AGENTS` | How many agents a Guard will hold (default 1000) |
+
+**A hosted Guard** runs at [https://hyperion-guard-dijsyl2kwq-uc.a.run.app](https://hyperion-guard-dijsyl2kwq-uc.a.run.app/docs), pointed at devnet. It is a
+demo: don't put money behind it. [`deploy_guard.sh`](../deploy_guard.sh) hosts
+your own on Cloud Run, with its state in Firestore and its key in Secret
+Manager. Run the devnet demo against either:
+
+```bash
+HYPERION_GUARD_URL=https://hyperion-guard-dijsyl2kwq-uc.a.run.app python guard/demo/solana_devnet.py
+```
+
+The Solana Guard is written for one running instance: it keeps a copy of its
+state in memory, and two instances sharing a store would let more through
+than the caps allow. It answers one request at a time.
 
 ## Try it in one command
 

@@ -30,6 +30,8 @@ from .solana.control import action_message, policy_message
 from .solana.decoder import ALLOWLISTED_PROGRAMS
 from .solana.lookup import RpcLookupTables, RpcTokenAccounts
 from .solana.prices import JupiterTokenPrices
+from .solana.store import store_from_env
+from .solana.vault import register_vault_program
 
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 HEX = re.compile(r"^0x([0-9a-fA-F]{2})*$")
@@ -56,8 +58,19 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         prices = None
         if price_url:
             prices = JupiterTokenPrices() if price_url == "jupiter" else JupiterTokenPrices(price_url)
-        solana_guard = SolanaGuardEngine(lookup_tables=RpcLookupTables(rpc_url) if rpc_url else None, prices=prices,
-                                         token_accounts=RpcTokenAccounts(rpc_url) if rpc_url else None)
+        # The co-signing key: a 32-byte Ed25519 seed in hex. Without it a key is made up at
+        # start-up and is gone at the next one, with every vault that named it.
+        seed = os.environ.get("HYPERION_SOLANA_COSIGNER_KEY", "").strip()
+        solana_guard = SolanaGuardEngine(
+            cosigner_private_key_bytes=bytes.fromhex(seed.removeprefix("0x")) if seed else None,
+            lookup_tables=RpcLookupTables(rpc_url) if rpc_url else None, prices=prices,
+            token_accounts=RpcTokenAccounts(rpc_url) if rpc_url else None,
+            # Where policies, nonces, usage and approvals are kept: see solana/store.py.
+            store=store_from_env(os.environ.get("HYPERION_SOLANA_STATE")))
+        for program_id in filter(None, os.environ.get("HYPERION_VAULT_PROGRAM_ID", "").split(",")):
+            register_vault_program(program_id)
+    # A public Guard shouldn't let strangers fill its store with policies.
+    max_agents = int(os.environ.get("HYPERION_SOLANA_MAX_AGENTS", "1000"))
     app.state.solana_guard = solana_guard
 
     @app.get("/v1/health")
@@ -191,8 +204,8 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
                 raise HTTPException(403, "Forbidden: Only the registered owner can modify an existing policy")
             if policy_version <= existing.policy_version:
                 raise HTTPException(409, f"policy_version {policy_version} must be strictly greater than current version {existing.policy_version}")
-        if not solana_guard.consume_nonce(agent_id, nonce):
-            raise HTTPException(409, "nonce already used: sign a new message with a higher nonce")
+        if existing is None and len(solana_guard.policies) >= max_agents:
+            raise HTTPException(507, f"this Guard holds its limit of {max_agents} agents")
 
         policy = SolanaAgentPolicy(
             agent_id=agent_id,
@@ -206,7 +219,9 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
             allowed_programs=set(allowed) if allowed else set(ALLOWLISTED_PROGRAMS),  # never None
             vault_address=vault_address,
         )
-        solana_guard.set_policy(policy)
+        # the nonce is used up and the policy saved together, or neither is
+        if not solana_guard.set_policy(policy, nonce=nonce):
+            raise HTTPException(409, "nonce already used: sign a new message with a higher nonce")
         return {
             "ok": True,
             "agent_id": agent_id,
@@ -266,11 +281,10 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
 
         if caller_pubkey not in authorized_callers:
             raise HTTPException(403, "Forbidden: Caller is neither owner nor guardian")
-        if not solana_guard.consume_nonce(agent_id, nonce):
+        if not solana_guard.kill_agent(agent_id, reason=str(body.get("reason", "")), nonce=nonce):
             raise HTTPException(409, "nonce already used: sign a new message with a higher nonce")
 
         reason = str(body.get("reason", "Emergency kill switch triggered"))
-        solana_guard.kill_agent(agent_id, reason=reason)
         return {"ok": True, "agent_id": agent_id, "killed": True, "reason": reason}
 
     @app.post("/v1/solana/revive")
@@ -296,10 +310,9 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         # ONLY the owner can revive! (Guardian or agent CANNOT revive)
         if caller_pubkey != policy.owner_solana_pubkey:
             raise HTTPException(403, "Forbidden: Guardian cannot revive, only the registered owner can revive an agent")
-        if not solana_guard.consume_nonce(agent_id, nonce):
+        if not solana_guard.revive_agent(agent_id, nonce=nonce):
             raise HTTPException(409, "nonce already used: an old revive can't undo a newer kill")
 
-        solana_guard.revive_agent(agent_id)
         return {"ok": True, "agent_id": agent_id, "killed": False}
 
     @app.post("/v1/solana/check")
