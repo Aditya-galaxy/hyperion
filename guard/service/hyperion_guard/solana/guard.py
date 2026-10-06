@@ -27,6 +27,13 @@ from .decoder import (
     decode_solana_transaction,
 )
 
+# What the Guard will co-sign: instructions it can size, a few that move and
+# grant nothing, and calls into programs the owner listed that it can't decode.
+CO_SIGNABLE = frozenset({
+    "JUPITER_SWAP", "RAYDIUM_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED", "SOL_TRANSFER", "VAULT_TRANSFER_SOL",
+    "TOKEN_HARMLESS", "EXTERNAL_CALL",
+})
+
 
 @dataclass
 class SolanaAgentPolicy:
@@ -277,6 +284,27 @@ class SolanaGuardEngine:
                     ),
                 )
 
+            # Check A.2: fail closed on anything the Guard can't put a size on. A decoded
+            # instruction is co-signable only if it's one of these kinds; a call into a
+            # program the owner listed that the Guard has no decoder for (EXTERNAL_CALL)
+            # is the owner's decision and passes.
+            kind = inst.details.get("inner_operation") if inst.operation == "VAULT_EXECUTE" else inst.operation
+            if kind not in CO_SIGNABLE:
+                what = inst.details.get("inner", inst.details) if inst.operation == "VAULT_EXECUTE" else inst.details
+                name = what.get("instruction_name") or what.get("type") or kind
+                return SolanaVerdict(
+                    approved=False,
+                    status="REJECTED_UNSUPPORTED_INSTRUCTION",
+                    agent_id=agent_id,
+                    recent_blockhash=decoded.recent_blockhash,
+                    evaluated_at_ns=now_ns,
+                    cosigner_pubkey=self.cosigner_pubkey_b58,
+                    cosigner_signature_b58=None,
+                    decoded_operations=operations,
+                    violation_details=(f"{inst.program_label}: {name} ({kind}) is not something the Guard can "
+                                       "size or check, so it won't co-sign it"),
+                )
+
             # Check B: Maximum Slippage Collar (MEV defense)
             if inst.slippage_bps is not None and inst.slippage_bps > policy.max_slippage_bps:
                 return SolanaVerdict(
@@ -309,10 +337,9 @@ class SolanaGuardEngine:
                 )
 
             # Check C: Notional Size Estimation (a vault Execute counts as its inner call)
-            kind = inst.details.get("inner_operation") if inst.operation == "VAULT_EXECUTE" else inst.operation
             if kind == "VAULT_TRANSFER_SOL":
                 kind = "SOL_TRANSFER"
-            if kind in ("JUPITER_SWAP", "RAYDIUM_SWAP", "PHOENIX_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED") and inst.input_amount is not None:
+            if kind in ("JUPITER_SWAP", "RAYDIUM_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED") and inst.input_amount is not None:
                 # Assume 6 decimals (standard for USDC on Solana)
                 est_usd = float(inst.input_amount) / 1e6
                 total_estimated_usd += est_usd
