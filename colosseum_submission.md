@@ -91,11 +91,17 @@ Hyperion Guard is built as a zero-overhead, sub-millisecond service within the H
 | **Guarded Vault (Solana program)** | [`guard/contracts_solana/`](guard/contracts_solana/) | Native Solana program, compiled with `cargo build-sbf`. Every agent action (TransferSol, Execute) needs the agent's and the Guard's signatures, a vault that isn't killed, a cap or an allow-listed target; the vault signs inner calls as a PDA. Guardian can kill, only the owner can revive, set policy or withdraw (even when killed). Tests run the compiled program in LiteSVM, including transactions built in Python and co-signed by the Guard. **Deployed on devnet:** [`9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq`](https://explorer.solana.com/address/9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq?cluster=devnet). |
 
 ### Supported Solana Protocols
-- **Jupiter V6 Aggregator:** `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4`
+- **Jupiter V6 Aggregator:** `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4`. All ten swap instructions in the program's on-chain IDL, including the `v2` routes most live swaps use. The two token-ledger routes carry no input amount and are refused.
 - **Phoenix Limit Order Book (decoded, not co-signed yet):** `PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY`
 - **Raydium AMM V4 (swaps):** `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8`
 - **SPL Token Program:** `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`
 - **Solana System Program:** `11111111111111111111111111111111`
+- **Compute Budget:** `ComputeBudget111111111111111111111111111111`. The priority fee (unit price times unit limit) counts toward the order cap.
+- **Associated Token Account:** `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL`. Opening a token account is allowed and its rent counted; `RecoverNested` is refused.
+
+**Checked against real mainnet transactions.** Six Jupiter transactions fetched from mainnet are kept as test fixtures ([`tests/fixtures/mainnet_jupiter.json`](guard/service/tests/fixtures/mainnet_jupiter.json)) and judged whole: compute budget, token-account setup, the wrap and unwrap of SOL, and the swap. Five are judged on slippage and size; the sixth closes a token account to another wallet and is refused.
+
+**Sizing limit.** A v0 transaction loads most accounts, usually including the swap's source mint, from address lookup tables, which the Guard doesn't fetch. When the mint is readable and is wrapped SOL, the swap is sized in SOL. Otherwise the input is read as a 6-decimal dollar token (right for USDC and USDT), which overstates a SOL swap about sixfold and can understate a high-priced token. Resolving lookup tables is the next step.
 
 ---
 
@@ -158,8 +164,8 @@ cd guard/service
 - 15 Rust High-Performance Quant Engine Tests (`cargo test`)
 - 15 Solana vault tests: 5 unit, 10 integration against the compiled program in LiteSVM (`cd guard/contracts_solana && cargo build-sbf && cargo test`)
 - 27 EVM Guard & Calldata Decoder Tests (`forge test`)
-- 157 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
-- **Total: 214 automated tests, all passing**
+- 172 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
+- **Total: 229 automated tests, all passing**
 
 ### Jito MEV & Sandwich Attack Simulation Benchmarks
 

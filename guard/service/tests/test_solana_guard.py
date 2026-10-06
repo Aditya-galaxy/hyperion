@@ -215,8 +215,8 @@ def test_decode_jupiter_v6_swap():
 
 
 def test_decode_jupiter_exact_out_route():
-    # exactOutRoute discriminator: 7e2c8ea1d9a65bc6
-    disc = bytes.fromhex("7e2c8ea1d9a65bc6")
+    # exact_out_route, from Jupiter's on-chain IDL
+    disc = bytes.fromhex("d033ef977b2bed5c")
     route_plan = b"\x01" * 15 # mock route plan steps
     out_amount = 50_000_000 # 50 SOL (desired out)
     quoted_in = 7_500_000_000 # 7,500 USDC (quoted in)
@@ -227,7 +227,8 @@ def test_decode_jupiter_exact_out_route():
 
     op_type, in_amt, quoted_out, slip, details = decode_jupiter_instruction(ix_data, [])
     assert op_type == "JUPITER_SWAP"
-    assert in_amt == quoted_in # input to spend
+    assert in_amt == 7_518_750_000 # the most it can spend: the quote plus 25 bps
+    assert details["quoted_in_raw"] == quoted_in
     assert quoted_out == out_amount # output desired
     assert slip == 25
     assert details["instruction_name"] == "exactOutRoute"
