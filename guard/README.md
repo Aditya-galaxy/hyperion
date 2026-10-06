@@ -73,9 +73,17 @@ is approved.
 | `HYPERION_SOLANA_PRICES` | `jupiter` for live prices of SOL and other tokens |
 | `HYPERION_VAULT_PROGRAM_ID` | The vault program(s) to recognise |
 | `HYPERION_SOLANA_MAX_AGENTS` | How many agents a Guard will hold (default 1000) |
+| `HYPERION_RATE_LIMIT` | Requests a minute from one address (off unless set) |
+| `HYPERION_RATE_LIMIT_WRITES` | Of those, requests that write: set a policy, kill, revive |
+| `HYPERION_RATE_LIMIT_GLOBAL` | Requests a minute from everyone together |
+| `HYPERION_TRUSTED_PROXIES` | Proxies in front of the Guard (Cloud Run: 1), so the caller's address is the one the proxy saw, not one the caller claims |
+
+Over a limit, the answer is `429` with `Retry-After`
+([`ratelimit.py`](service/hyperion_guard/ratelimit.py)).
 
 **A hosted Guard** runs at [https://hyperion-guard-dijsyl2kwq-uc.a.run.app](https://hyperion-guard-dijsyl2kwq-uc.a.run.app/docs), pointed at devnet. It is a
-demo: don't put money behind it. [`deploy_guard.sh`](../deploy_guard.sh) hosts
+demo: don't put money behind it. It allows 120 requests a minute from one
+address, 10 of them writes, and holds at most 200 agents. [`deploy_guard.sh`](../deploy_guard.sh) hosts
 your own on Cloud Run, with its state in Firestore and its key in Secret
 Manager. Run the devnet demo against either:
 

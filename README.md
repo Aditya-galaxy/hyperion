@@ -1,12 +1,24 @@
 # Hyperion
 
+[![Hosted Guard](https://img.shields.io/badge/live-Hyperion%20Guard%20API-1f8a4c.svg)](https://hyperion-guard-dijsyl2kwq-uc.a.run.app/docs)
+[![Solana devnet](https://img.shields.io/badge/solana%20devnet-Guarded%20Vault-9945ff.svg)](https://explorer.solana.com/address/9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq?cluster=devnet)
 [![Live site](https://img.shields.io/badge/live-Hyperion%20Events-2a78d6.svg)](https://storage.googleapis.com/hyperion-events-site-kronagent/index.html)
 [![Build Status](https://github.com/Aditya-galaxy/hyperion/actions/workflows/ci.yml/badge.svg)](https://github.com/Aditya-galaxy/hyperion/actions)
 [![Code: MIT](https://img.shields.io/badge/code-MIT-yellow.svg)](LICENSE)
 [![Data: CC BY-NC-SA 4.0](https://img.shields.io/badge/data-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
 
+Hyperion is three pieces of trading research in one repository:
+
+- **[Hyperion Guard](#️-hyperion-guard-a-firewall-for-trading-agents):** a
+  pre-trade firewall and co-signer for autonomous trading agents. Live on
+  Solana devnet, with a hosted API.
+- **[Hyperion Events](#-hyperion-events-exchange-notices-vs-real-prices):** an
+  open event study of exchange notices against real prices, with a live site.
+- **[A low-latency engine in Rust](#️-the-rust-engine-research-code):**
+  research code, run on simulated data.
+
 **What exchange notices do to crypto prices, second by second, and how fast
-you'd have had to be to trade them.** Hyperion matches every Upbit trade notice
+you'd have had to be to trade them.** Hyperion Events matches every Upbit trade notice
 (listings, delistings, caution designations) against Binance's one-second price
 archive, and measures how much of each move was still there for an order filled
 0–10 seconds late, after fees.

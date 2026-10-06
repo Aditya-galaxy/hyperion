@@ -17,14 +17,17 @@ from __future__ import annotations
 
 import base64
 import binascii
+import math
 import os
 import re
 from typing import Annotated
 
 from eth_account import Account
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from .engine import ExecutorCall, Guard, GuardUnavailable, parse_order
+from .ratelimit import Limits
 from .solana import SolanaAgentPolicy, SolanaGuardEngine, b58decode
 from .solana.control import action_message, policy_message
 from .solana.decoder import ALLOWLISTED_PROGRAMS
@@ -43,9 +46,24 @@ def _address(value: str, name: str) -> str:
     return value
 
 
-def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | None = None) -> FastAPI:
+def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | None = None,
+               limits: Limits | None = None) -> FastAPI:
     app = FastAPI(title="Hyperion Guard", version="1",
                   description="Pre-trade risk checks for autonomous trading agents, with multi-chain protection (Arc EVM + Solana).")
+
+    # How often anyone may ask: see ratelimit.py. Off unless set in the environment.
+    limits = limits if limits is not None else Limits.from_env()
+    app.state.limits = limits
+    if limits.enabled:
+        @app.middleware("http")
+        async def rate_limit(request: Request, call_next):
+            refused = limits.check(request.method, request.url.path, request.client.host if request.client else None,
+                                   request.headers.get("x-forwarded-for"))
+            if refused is not None:
+                what, wait = refused
+                return JSONResponse({"detail": f"Too many {what}. Try again in {math.ceil(wait)} s."}, status_code=429,
+                                    headers={"Retry-After": str(math.ceil(wait))})
+            return await call_next(request)
     signer = Account.from_key(guard.signer_key).address if guard else None
     if solana_guard is None:
         # With an RPC node the Guard reads the address lookup tables v0 transactions use, and

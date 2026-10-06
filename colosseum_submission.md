@@ -187,8 +187,8 @@ cd guard/service
 - 15 Rust High-Performance Quant Engine Tests (`cargo test`)
 - 15 Solana vault tests: 5 unit, 10 integration against the compiled program in LiteSVM (`cd guard/contracts_solana && cargo build-sbf && cargo test`)
 - 27 EVM Guard & Calldata Decoder Tests (`forge test`)
-- 253 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
-- **Total: 310 automated tests, all passing**
+- 271 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
+- **Total: 328 automated tests, all passing**
 
 ### Jito MEV & Sandwich Attack Simulation Benchmarks
 
@@ -281,7 +281,7 @@ One terminal and one browser tab. No slides except the opening and closing cards
 - **GitHub Repository:** [https://github.com/Aditya-galaxy/hyperion](https://github.com/Aditya-galaxy/hyperion)
 - **Solana Guard Module:** [`guard/service/hyperion_guard/solana/`](guard/service/hyperion_guard/solana/)
 - **Solana Guarded Vault program, on devnet:** [`9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq`](https://explorer.solana.com/address/9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq?cluster=devnet); source in [`guard/contracts_solana/`](guard/contracts_solana/)
-- **Hosted Guard API (devnet, a demo):** [https://hyperion-guard-dijsyl2kwq-uc.a.run.app](https://hyperion-guard-dijsyl2kwq-uc.a.run.app/docs). Health: [`/v1/solana/health`](https://hyperion-guard-dijsyl2kwq-uc.a.run.app/v1/solana/health). Hosted with [`deploy_guard.sh`](deploy_guard.sh) on Cloud Run; state in Firestore, key in Secret Manager.
+- **Hosted Guard API (devnet, a demo):** [https://hyperion-guard-dijsyl2kwq-uc.a.run.app](https://hyperion-guard-dijsyl2kwq-uc.a.run.app/docs). Health: [`/v1/solana/health`](https://hyperion-guard-dijsyl2kwq-uc.a.run.app/v1/solana/health). Hosted with [`deploy_guard.sh`](deploy_guard.sh) on Cloud Run; state in Firestore, key in Secret Manager, rate limited per caller (120 requests a minute, 10 of them writes).
 - **Live devnet demo:** [`guard/demo/solana_devnet.py`](guard/demo/solana_devnet.py), six scenes, each a real transaction (links in section 7)
 - **Jito MEV Simulation Harness:** [`scripts/jito_mev_harness.py`](scripts/jito_mev_harness.py)
 - **Test Suite:** [`guard/service/tests/test_solana_guard.py`](guard/service/tests/test_solana_guard.py)
