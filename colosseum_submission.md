@@ -99,18 +99,19 @@ Hyperion Guard is built as a zero-overhead, sub-millisecond service within the H
 - **Compute Budget:** `ComputeBudget111111111111111111111111111111`. The priority fee (unit price times unit limit) counts toward the order cap.
 - **Associated Token Account:** `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL`. Opening a token account is allowed and its rent counted; `RecoverNested` is refused.
 
-**Checked against real mainnet transactions.** Nine Jupiter transactions fetched from mainnet, with the lookup-table entries they use, are kept as test fixtures ([`tests/fixtures/mainnet_jupiter.json`](guard/service/tests/fixtures/mainnet_jupiter.json)) and judged whole: compute budget, token-account setup, the wrap and unwrap of SOL, and the swap. Five spend USDC or SOL and are sized to the cent. Four sell another token: with a price for it they are sized the same way, and without one they are refused.
+**Checked against real mainnet transactions.** Nine Jupiter transactions fetched from mainnet, with the lookup-table entries and token account they use, are kept as test fixtures ([`tests/fixtures/mainnet_jupiter.json`](guard/service/tests/fixtures/mainnet_jupiter.json)) and judged whole: compute budget, token-account setup, the wrap and unwrap of SOL, and the swap. Five spend USDC or SOL and are sized to the cent. Four sell another token: with a price for it they are sized the same way, and without one they are refused.
 
 **How a swap is sized.** A token amount is only a dollar figure if the Guard knows the token, so it finds out which token an instruction spends:
 
 1. **From the instruction's accounts**, where it names its source mint. A v0 transaction loads most accounts from address lookup tables; given an RPC node (`HYPERION_SOLANA_RPC_URL`) the Guard reads those tables and caches them.
 2. **From the wallet's own token account.** If the account being spent is the signer's associated token account for USDC, USDT or wrapped SOL, that settles it with no network call.
+3. **From the token account itself.** Jupiter's older `route`, Raydium's swaps and a plain token `Transfer` spend a token account without naming its mint. The Guard reads the account over RPC to learn it. An associated token account's mint is fixed by its address and is remembered; any other account could be reopened for a different mint, so it's read every time.
 
 USDC and USDT are taken at $1. SOL and every other token are priced by a price source: Jupiter's price API when `HYPERION_SOLANA_PRICES=jupiter` is set. Wrapping SOL into the wallet's own account isn't counted as spending it; the swap that follows is. **Anything the Guard can't price is refused** (`REJECTED_UNPRICED_TOKEN`): a token that couldn't be identified, one the source has no price for, or SOL when there is no source. The Guard doesn't guess, and it has no built-in SOL price.
 
 **Keeping a bad price from becoming an approval.** A price is used for 10 seconds, then asked for again. A failed request is no price, never the last one. A token with under $100,000 of liquidity behind its price has no price: a thin market is cheap to push down, and a price pushed down would let a large sale through under the cap.
 
-**What that leaves out.** A token too thinly traded to have a trusted price can't be sold through the Guard. A swap through Jupiter's older `route` instruction, or a plain token `Transfer`, doesn't name its token, so it's sized only when it spends the wallet's own USDC, USDT or wrapped-SOL account. And the Guard believes its RPC node about a lookup table's contents and its price source about prices.
+**What that leaves out.** A token too thinly traded to have a trusted price can't be sold through the Guard. A token account opened in the same transaction that spends it can't be read beforehand, so it's identified only if it's the wallet's own USDC, USDT or wrapped-SOL account. And the Guard believes its RPC node about lookup tables and token accounts, and its price source about prices.
 
 ---
 
@@ -173,8 +174,8 @@ cd guard/service
 - 15 Rust High-Performance Quant Engine Tests (`cargo test`)
 - 15 Solana vault tests: 5 unit, 10 integration against the compiled program in LiteSVM (`cd guard/contracts_solana && cargo build-sbf && cargo test`)
 - 27 EVM Guard & Calldata Decoder Tests (`forge test`)
-- 200 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
-- **Total: 257 automated tests, all passing**
+- 220 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
+- **Total: 277 automated tests, all passing**
 
 ### Jito MEV & Sandwich Attack Simulation Benchmarks
 
@@ -190,7 +191,7 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 | **Median Guard Latency**| N/A | **32 µs** to refuse; **0.36 ms** to approve and sign |
 
 > [!NOTE]
-> Measured on a laptop, in Python: a refusal takes a median of **32 µs**; an approval takes **0.36 ms**, nearly all of it the Ed25519 signature. Both are under 0.1% of Solana's 400 ms slot. Two things cost more, once each: the first transaction from a wallet (about 0.3 to 0.8 ms to work out its token accounts), and the first use of a lookup table or of a token's price (then every 10 seconds), each a network call of roughly 0.2 to 0.3 s to a public endpoint.
+> Measured on a laptop, in Python: a refusal takes a median of **32 µs**; an approval takes **0.36 ms**, nearly all of it the Ed25519 signature. Both are under 0.1% of Solana's 400 ms slot. Two things cost more, once each: the first transaction from a wallet (about 0.3 to 0.8 ms to work out its token accounts), and the first use of a lookup table, a token account or a token's price (prices again every 10 seconds), each a network call of roughly 0.2 to 0.3 s to a public endpoint.
 
 ---
 

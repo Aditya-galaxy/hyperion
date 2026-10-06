@@ -240,5 +240,9 @@
    "14": "G5UZAVbAf46s7cKWoyKu8kYTip9DGTpbLZ2qa9Aq69dP",
    "46": "GS4CU59F31iL7aR2Q8zVS8DRrcRnXX1yjQ66TqNVQnaR"
   }
+ },
+ "token_accounts_note": "Token accounts these transactions spend without naming the mint: account -> mint, read with getAccountInfo.",
+ "token_accounts": {
+  "9qFWSGcD4Un9zEoLw6GKDykcBXYWgitCPsZDekJtaBN2": "5CBCv1QPstY78ZEh4s2Fai6sP88Eu7HiMD4RzersQBD6"
  }
 }
