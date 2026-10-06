@@ -31,6 +31,7 @@ from .decoder import (
     LookupTables,
     decode_solana_transaction,
 )
+from .prices import TokenPrices
 
 # What the Guard will co-sign: instructions it can size, a few that move and
 # grant nothing, and calls into programs the owner listed that it can't decode.
@@ -68,14 +69,20 @@ class SolanaVerdict:
     violation_details: str | None = None
 
 class SolanaGuardEngine:
-    def __init__(self, cosigner_private_key_bytes: bytes | None = None, lookup_tables: LookupTables | None = None):
+    def __init__(self, cosigner_private_key_bytes: bytes | None = None, lookup_tables: LookupTables | None = None,
+                 prices: TokenPrices | None = None):
         """Initializes the Guard engine with an Ed25519 co-signer keypair.
 
         `lookup_tables` resolves the address lookup tables v0 transactions use
         (see lookup.RpcLookupTables). Without it, accounts named through a
         table stay unknown, and a swap whose input token can't be told from
-        the rest of the transaction is refused."""
+        the rest of the transaction is refused.
+
+        `prices` gives the dollar price of SOL and of other tokens (see
+        prices.JupiterTokenPrices). USDC and USDT are always $1. Without it,
+        only those two can be sized, unless the caller passes a SOL price."""
         self.lookup_tables = lookup_tables
+        self.prices = prices
         if cosigner_private_key_bytes:
             self._key = ECC.import_key(cosigner_private_key_bytes)
         else:
@@ -135,11 +142,14 @@ class SolanaGuardEngine:
         self,
         agent_id: str,
         raw_tx_bytes: bytes,
-        sol_price_usd: float = 150.0,
+        sol_price_usd: float | None = None,
     ) -> SolanaVerdict:
         """
         Inspects serialized Solana transaction against policy rules.
         If compliant, co-signs the transaction message.
+
+        `sol_price_usd` overrides the price source's SOL price (for tests and
+        demos that want repeatable dollar figures).
         """
         now_ns = time.time_ns()
         now_sec = time.time()
@@ -232,6 +242,7 @@ class SolanaGuardEngine:
         total_estimated_usd = 0.0
         operations = []
         unit_price_micro_lamports = 0
+        sol_lamports = 0.0
         unit_limit: int | None = None
 
         for inst in decoded.instructions:
@@ -349,7 +360,8 @@ class SolanaGuardEngine:
                                        "(minimum out of 0, or no maximum in): unlimited slippage"),
                 )
 
-            # Check C: Notional Size Estimation (a vault Execute counts as its inner call)
+            # Check C: Notional Size Estimation (a vault Execute counts as its inner call).
+            # SOL is totalled in lamports and priced once, below.
             if kind == "VAULT_TRANSFER_SOL":
                 kind = "SOL_TRANSFER"
             what = inst.details.get("inner", {}) if inst.operation == "VAULT_EXECUTE" else inst.details
@@ -358,23 +370,29 @@ class SolanaGuardEngine:
                 if "units" in what:
                     unit_limit = max(unit_limit or 0, what["units"])
             elif kind in ("SOL_TRANSFER", "ATA_CREATE") and inst.input_amount is not None:
-                # Lamports (9 decimals) * sol_price_usd
-                total_estimated_usd += (float(inst.input_amount) / 1e9) * sol_price_usd
+                sol_lamports += inst.input_amount
             elif kind in ("JUPITER_SWAP", "RAYDIUM_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED") and inst.input_amount is not None:
-                # A token amount is only a dollar figure if the Guard knows the token.
+                # A token amount is only a dollar figure if the Guard knows the token and its price.
                 mint = what.get("source_mint")
                 if mint in (USDC_MINT, USDT_MINT):
                     total_estimated_usd += float(inst.input_amount) / 1e6
                 elif mint == WSOL_MINT:
-                    total_estimated_usd += (float(inst.input_amount) / 1e9) * sol_price_usd
+                    sol_lamports += inst.input_amount
                 else:
-                    if mint:
-                        why = f"it spends token {mint}, which the Guard has no price for"
-                    else:
+                    token_price = self.prices.price(mint) if mint and self.prices else None
+                    if token_price is not None:
+                        total_estimated_usd += token_price.value(inst.input_amount)
+                        continue
+                    if not mint:
                         why = "the token it spends couldn't be identified"
                         if decoded.unresolved_accounts:
                             why += (f" ({decoded.unresolved_accounts} of the transaction's accounts are in lookup "
                                     "tables the Guard couldn't read)")
+                    elif self.prices is None:
+                        why = f"it spends token {mint}, and the Guard has no price source for tokens"
+                    else:
+                        why = (f"it spends token {mint}, which the Guard has no price for "
+                               "(none available, or too little liquidity behind it to trust)")
                     return SolanaVerdict(
                         approved=False,
                         status="REJECTED_UNPRICED_TOKEN",
@@ -390,8 +408,28 @@ class SolanaGuardEngine:
         # Check C.1: the priority fee is SOL the agent spends too. With no limit set,
         # assume the most a transaction can use.
         if unit_price_micro_lamports:
-            fee_lamports = unit_price_micro_lamports * min(unit_limit or MAX_COMPUTE_UNITS, MAX_COMPUTE_UNITS) / 1e6
-            total_estimated_usd += (fee_lamports / 1e9) * sol_price_usd
+            sol_lamports += unit_price_micro_lamports * min(unit_limit or MAX_COMPUTE_UNITS, MAX_COMPUTE_UNITS) / 1e6
+
+        # Check C.2: price the SOL. The caller's figure if it gave one, else the price
+        # source's. There is no built-in figure: without a price, SOL can't be sized.
+        if sol_lamports:
+            if sol_price_usd is None and self.prices is not None:
+                sol = self.prices.price(WSOL_MINT)
+                sol_price_usd = sol.usd if sol else None
+            if sol_price_usd is None or not sol_price_usd > 0:
+                return SolanaVerdict(
+                    approved=False,
+                    status="REJECTED_UNPRICED_TOKEN",
+                    agent_id=agent_id,
+                    recent_blockhash=decoded.recent_blockhash,
+                    evaluated_at_ns=now_ns,
+                    cosigner_pubkey=self.cosigner_pubkey_b58,
+                    cosigner_signature_b58=None,
+                    decoded_operations=operations,
+                    violation_details=(f"can't size the {sol_lamports / 1e9:.9f} SOL this transaction spends against "
+                                       "the dollar caps: no SOL price is available"),
+                )
+            total_estimated_usd += (sol_lamports / 1e9) * sol_price_usd
 
         # Check D: Order Notional Cap
         if total_estimated_usd > policy.max_order_notional_usd:
