@@ -72,7 +72,7 @@ The Guard alone protects an agent that chooses to ask it. The vault is what make
 - **Deep DEX Instruction Decoding:** Native unpacking of Anchor 8-byte discriminators and variable-length route plans with 19-byte parameter suffixes for Jupiter V6 (`sharedAccountsRoute`, `route`) and Raydium AMM V4 swaps (`swapBaseIn`, `swapBaseOut` and their V2 forms). Raydium's instruction has no slippage figure, so the Guard requires a real limit instead (a non-zero minimum out, or a maximum in) and refuses Raydium's non-swap instructions.
 - **Fail-Closed on Everything Else:** An allow-listed program is inspected, not waved through. The Guard co-signs only instructions it can size (swaps, token and SOL transfers) or knows move nothing (opening a token account, `SyncNative`, `Revoke`). It refuses token `Approve`, `SetAuthority`, `CloseAccount` and `Burn`; System `Assign` and durable-nonce instructions (a transaction on a durable nonce never expires, so a co-signature on one would outlive a kill); and every Phoenix instruction. Phoenix orders are decoded (type, side, ticks, lots), but lots only become dollars with a market's parameters, which the Guard doesn't have yet. One exception: a program the owner adds that the Guard has no decoder for is passed on the owner's word.
 - **Anti-MEV Slippage Collar:** Directly inspects `slippage_bps` encoded in DEX swaps, bounding maximum acceptable slippage to eliminate sandwich vulnerability.
-- **Notional Size Caps:** Binds maximum USD exposure per order and throttles runaway trading loops. Swaps and transfers are sized in the token they actually spend (USDC, USDT, SOL); a token the Guard can't price is refused, not guessed.
+- **Notional Size Caps:** Binds maximum USD exposure per order and throttles runaway trading loops. Swaps and transfers are sized in the token they actually spend, at a live price; a token the Guard can't price is refused, not guessed.
 - **Cryptographic Kill Switch:** Owner/Guardian Ed25519-signed endpoint immediately revokes an agent's trading authority without requiring on-chain transaction delays. Guardians may trip the kill switch, but only the registered owner can revive trading.
 - **Dual-Signature Multisig Enforcement:** Reference dual-signer execution vault specification and state machine (`guard/contracts_solana/`) enforcing both Agent signature and Guard Ed25519 co-signature for non-custodial agent risk isolation.
 
@@ -99,16 +99,18 @@ Hyperion Guard is built as a zero-overhead, sub-millisecond service within the H
 - **Compute Budget:** `ComputeBudget111111111111111111111111111111`. The priority fee (unit price times unit limit) counts toward the order cap.
 - **Associated Token Account:** `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL`. Opening a token account is allowed and its rent counted; `RecoverNested` is refused.
 
-**Checked against real mainnet transactions.** Nine Jupiter transactions fetched from mainnet, with the lookup-table entries they use, are kept as test fixtures ([`tests/fixtures/mainnet_jupiter.json`](guard/service/tests/fixtures/mainnet_jupiter.json)) and judged whole: compute budget, token-account setup, the wrap and unwrap of SOL, and the swap. Five spend USDC or SOL and are sized to the cent; four sell a token the Guard has no price for and are refused.
+**Checked against real mainnet transactions.** Nine Jupiter transactions fetched from mainnet, with the lookup-table entries they use, are kept as test fixtures ([`tests/fixtures/mainnet_jupiter.json`](guard/service/tests/fixtures/mainnet_jupiter.json)) and judged whole: compute budget, token-account setup, the wrap and unwrap of SOL, and the swap. Five spend USDC or SOL and are sized to the cent. Four sell another token: with a price for it they are sized the same way, and without one they are refused.
 
 **How a swap is sized.** A token amount is only a dollar figure if the Guard knows the token, so it finds out which token an instruction spends:
 
 1. **From the instruction's accounts**, where it names its source mint. A v0 transaction loads most accounts from address lookup tables; given an RPC node (`HYPERION_SOLANA_RPC_URL`) the Guard reads those tables and caches them.
 2. **From the wallet's own token account.** If the account being spent is the signer's associated token account for USDC, USDT or wrapped SOL, that settles it with no network call.
 
-USDC and USDT are taken at $1, wrapped SOL at the SOL price. Wrapping SOL into the wallet's own account isn't counted as spending it; the swap that follows is. **Anything else is refused** (`REJECTED_UNPRICED_TOKEN`): a token with no price, or one that couldn't be identified. The Guard no longer guesses.
+USDC and USDT are taken at $1. SOL and every other token are priced by a price source: Jupiter's price API when `HYPERION_SOLANA_PRICES=jupiter` is set. Wrapping SOL into the wallet's own account isn't counted as spending it; the swap that follows is. **Anything the Guard can't price is refused** (`REJECTED_UNPRICED_TOKEN`): a token that couldn't be identified, one the source has no price for, or SOL when there is no source. The Guard doesn't guess, and it has no built-in SOL price.
 
-**What that leaves out.** An agent can buy any token with USDC or SOL through the Guard, but can't sell a token the Guard can't price. That needs a price feed per token, which is the next step. And the Guard believes its RPC node about a lookup table's contents.
+**Keeping a bad price from becoming an approval.** A price is used for 10 seconds, then asked for again. A failed request is no price, never the last one. A token with under $100,000 of liquidity behind its price has no price: a thin market is cheap to push down, and a price pushed down would let a large sale through under the cap.
+
+**What that leaves out.** A token too thinly traded to have a trusted price can't be sold through the Guard. A swap through Jupiter's older `route` instruction, or a plain token `Transfer`, doesn't name its token, so it's sized only when it spends the wallet's own USDC, USDT or wrapped-SOL account. And the Guard believes its RPC node about a lookup table's contents and its price source about prices.
 
 ---
 
@@ -171,8 +173,8 @@ cd guard/service
 - 15 Rust High-Performance Quant Engine Tests (`cargo test`)
 - 15 Solana vault tests: 5 unit, 10 integration against the compiled program in LiteSVM (`cd guard/contracts_solana && cargo build-sbf && cargo test`)
 - 27 EVM Guard & Calldata Decoder Tests (`forge test`)
-- 181 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
-- **Total: 238 automated tests, all passing**
+- 200 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
+- **Total: 257 automated tests, all passing**
 
 ### Jito MEV & Sandwich Attack Simulation Benchmarks
 
@@ -188,7 +190,7 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 | **Median Guard Latency**| N/A | **32 µs** to refuse; **0.36 ms** to approve and sign |
 
 > [!NOTE]
-> Measured on a laptop, in Python: a refusal takes a median of **32 µs**; an approval takes **0.36 ms**, nearly all of it the Ed25519 signature. Both are under 0.1% of Solana's 400 ms slot. Two things cost more, once each: the first transaction from a wallet (about 0.3 to 0.8 ms to work out its token accounts), and the first use of a lookup table, which is a network call to the RPC node.
+> Measured on a laptop, in Python: a refusal takes a median of **32 µs**; an approval takes **0.36 ms**, nearly all of it the Ed25519 signature. Both are under 0.1% of Solana's 400 ms slot. Two things cost more, once each: the first transaction from a wallet (about 0.3 to 0.8 ms to work out its token accounts), and the first use of a lookup table or of a token's price (then every 10 seconds), each a network call of roughly 0.2 to 0.3 s to a public endpoint.
 
 ---
 

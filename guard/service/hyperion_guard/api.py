@@ -29,6 +29,7 @@ from .solana import SolanaAgentPolicy, SolanaGuardEngine, b58decode
 from .solana.control import action_message, policy_message
 from .solana.decoder import ALLOWLISTED_PROGRAMS
 from .solana.lookup import RpcLookupTables
+from .solana.prices import JupiterTokenPrices
 
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 HEX = re.compile(r"^0x([0-9a-fA-F]{2})*$")
@@ -49,7 +50,14 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         # so it can tell which token a swap spends. Without one, a swap whose token can't
         # be told from the transaction alone is refused.
         rpc_url = os.environ.get("HYPERION_SOLANA_RPC_URL")
-        solana_guard = SolanaGuardEngine(lookup_tables=RpcLookupTables(rpc_url) if rpc_url else None)
+        # With a price source it can size SOL and other tokens; without one, only USDC and USDT.
+        # "jupiter" is Jupiter's public price API; anything else is the URL of a compatible one.
+        price_url = os.environ.get("HYPERION_SOLANA_PRICES")
+        prices = None
+        if price_url:
+            prices = JupiterTokenPrices() if price_url == "jupiter" else JupiterTokenPrices(price_url)
+        solana_guard = SolanaGuardEngine(lookup_tables=RpcLookupTables(rpc_url) if rpc_url else None, prices=prices)
+    app.state.solana_guard = solana_guard
 
     @app.get("/v1/health")
     def health():
