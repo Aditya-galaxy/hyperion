@@ -1,7 +1,7 @@
 # 🏛️ Colosseum Hackathon Submission Dossier
 
-**Submission URL:** [https://colosseum.com/arena/hackathon](https://colosseum.com/arena/hackathon)  
-**Hackathon:** Colosseum Arena (Fall 2026 Global Hackathon)  
+**Submission URL:** [https://colosseum.com/worldsfair](https://colosseum.com/worldsfair)  
+**Hackathon:** Colosseum Crypto World's Fair Hackathon (submissions close October 12, 2026)  
 **Project Name:** **Hyperion Guard (Solana Agent Firewall)**  
 **Track:** AI Agents / Infrastructure & Developer Tooling / DeFi  
 **Repository:** [https://github.com/Aditya-galaxy/hyperion](https://github.com/Aditya-galaxy/hyperion)  
@@ -14,7 +14,7 @@
 
 Autonomous trading agents on Solana are rapidly executing across Jupiter, Phoenix LOB, and Raydium. However, autonomous agents suffer from failure modes: model hallucinations, prompt injection attacks, stale pricing, and toxic sandwich MEV exploitation by searchers. Because Solana processes blocks in ~400ms, **post-trade monitoring is a post-mortem**. 
 
-**Hyperion Guard** is an institutional pre-trade risk gateway and cryptographic co-signer designed for the Solana agentic economy (prototype). Before any raw Solana transaction payload reaches validators, Hyperion Guard intercepts the wire bytes, decodes the compiled instructions (Jupiter V6 and Raydium AMM V4 swaps, SPL Token and SOL transfers, and the Guarded Vault), checks strict risk firewalls, and co-signs compliant transactions with an authorized Ed25519 key. If an agent hallucinates an excessive swap size, accepts toxic slippage, or is targeted by an unapproved program, the Guard rejects the transaction before a single lamport is risked.
+**Hyperion Guard** is a pre-trade risk gateway and cryptographic co-signer for autonomous agents on Solana. It is a prototype: on devnet, not audited. Before any raw Solana transaction payload reaches validators, Hyperion Guard intercepts the wire bytes, decodes the compiled instructions (Jupiter V6 and Raydium AMM V4 swaps, SPL Token and SOL transfers, and the Guarded Vault), checks strict risk firewalls, and co-signs compliant transactions with an authorized Ed25519 key. If an agent hallucinates an excessive swap size, accepts toxic slippage, or is targeted by an unapproved program, the Guard rejects the transaction before a single lamport is risked.
 
 ---
 
@@ -28,7 +28,7 @@ Autonomous trading agents on Solana are rapidly executing across Jupiter, Phoeni
 
 ## 3. The Solution: Hyperion Solana Guard
 
-Hyperion Guard acts as an institutional pre-trade co-signing firewall:
+Hyperion Guard is a pre-trade co-signing firewall:
 
 ```
 ┌─────────────────────────┐
@@ -80,7 +80,7 @@ The Guard alone protects an agent that chooses to ask it. The vault is what make
 
 ## 4. Architecture & Technical Implementation
 
-Hyperion Guard is built as a zero-overhead, sub-millisecond service within the Hyperion repository (`guard/service/hyperion_guard/solana/`):
+Hyperion Guard is a service within the Hyperion repository (`guard/service/hyperion_guard/solana/`):
 
 | Component | File Path | Implementation Details |
 | :--- | :--- | :--- |
@@ -115,32 +115,35 @@ USDC and USDT are taken at $1. SOL and every other token are priced by a price s
 
 ---
 
-## 5. Developer Integration (Python / TypeScript)
+## 5. Developer Integration (Python)
 
-Autonomous agents integrate Hyperion Guard with minimal overhead:
+The Guard only binds an agent if its signature is needed for the transaction to land. So the agent's money sits in a Guarded Vault, and the agent's transactions are vault instructions with the Guard as a required signer. This is the flow [`guard/demo/solana_devnet.py`](guard/demo/solana_devnet.py) runs on devnet:
 
 ```python
-import base64
-import requests
+from hyperion_guard.solana import vault as v
+from hyperion_guard.solana.base58 import b58decode
+from hyperion_guard.solana.tx import add_signature, compile_message, serialize, sign
 
-# 1. Autonomous agent generates a swap transaction via Jupiter API
-swap_tx_bytes = jupiter_client.get_swap_transaction(quote)
+# 1. The agent builds a vault instruction: pay 0.02 SOL from its vault.
+#    (v.execute(...) wraps any other call, such as a Jupiter swap, the same way.)
+ix = v.transfer_sol(VAULT_PROGRAM, vault, agent, guard_pubkey, merchant, 20_000_000)
+message, keys, n_signers = compile_message([ix], fee_payer=agent, recent_blockhash=blockhash)
+raw = serialize(message, keys, n_signers, {agent: sign(message, agent_key)})    # the Guard's slot is empty
 
-# 2. Submit transaction bytes to local or self-hosted Hyperion Guard for pre-trade clearance
-response = requests.post("http://localhost:8080/v1/solana/check", json={
-    "agent_id": "ai-alpha-agent-sol-1",
-    "tx_bytes": base64.b64encode(swap_tx_bytes).decode("ascii"),
-    "encoding": "base64"
-})
-verdict = response.json()
+# 2. It asks the Guard. Over HTTP: POST /v1/solana/check {"agent_id", "tx_bytes", "encoding": "base64"}
+verdict = guard.evaluate_transaction("agent-1", raw)
 
-if verdict["approved"]:
-    # 3. Attach Guard's Ed25519 co-signature and broadcast to Solana RPC / Jito
-    signed_tx = attach_cosigner_signature(swap_tx_bytes, verdict["cosigner_signature_b58"])
-    solana_client.send_raw_transaction(signed_tx)
+if verdict.approved:
+    # 3. The Guard's signature completes the transaction.
+    signed = add_signature(raw, guard_pubkey, b58decode(verdict.cosigner_signature_b58))
+    send(signed)
 else:
-    print(f"Trade blocked by Hyperion Guard: {verdict['status']} - {verdict['violation_details']}")
+    print(verdict.status, verdict.violation_details)       # no signature: the vault won't pay
 ```
+
+A transaction that doesn't name the Guard as a required signer, such as one taken as-is from Jupiter's swap API, is refused (`REJECTED_MISSING_GUARD_SIGNER`): the Guard's opinion of it couldn't be enforced. A policy can turn that requirement off to use the Guard as an advisory check only.
+
+The client is Python. There is no TypeScript client yet.
 
 ---
 
@@ -186,7 +189,7 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 | **Simulation Model** | Searcher computes optimal front-run | Intercepted pre-trade, before signing |
 | **Searcher Front-run** | Injects $76,366 USDC pushing spot to $153.07 | **Blocked** (Zero victim tx to bundle) |
 | **Searcher Gross Profit** | +$121.63 USDC (75% to Jito Validator) | $0.00 USDC (Searcher drops bundle) |
-| **Agent Capital Loss** | **-$497.10 USDC (-2.0% loss)** | **$0.00 USDC (100% Protected)** |
+| **Agent Capital Loss** | **-$497.10 USDC (-2.0% loss)** | **$0.00 USDC** (the trade isn't sent) |
 | **Ed25519 Co-Signature** | N/A | **WITHHELD** (`REJECTED_EXCESSIVE_SLIPPAGE`) |
 | **Median Guard Latency**| N/A | **32 µs** to refuse; **0.36 ms** to approve and sign |
 
