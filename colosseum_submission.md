@@ -72,7 +72,7 @@ The Guard alone protects an agent that chooses to ask it. The vault is what make
 - **Deep DEX Instruction Decoding:** Native unpacking of Anchor 8-byte discriminators and variable-length route plans with 19-byte parameter suffixes for Jupiter V6 (`sharedAccountsRoute`, `route`) and Raydium AMM V4 swaps (`swapBaseIn`, `swapBaseOut` and their V2 forms). Raydium's instruction has no slippage figure, so the Guard requires a real limit instead (a non-zero minimum out, or a maximum in) and refuses Raydium's non-swap instructions.
 - **Fail-Closed on Everything Else:** An allow-listed program is inspected, not waved through. The Guard co-signs only instructions it can size (swaps, token and SOL transfers) or knows move nothing (opening a token account, `SyncNative`, `Revoke`). It refuses token `Approve`, `SetAuthority`, `CloseAccount` and `Burn`; System `Assign` and durable-nonce instructions (a transaction on a durable nonce never expires, so a co-signature on one would outlive a kill); and every Phoenix instruction. Phoenix orders are decoded (type, side, ticks, lots), but lots only become dollars with a market's parameters, which the Guard doesn't have yet. One exception: a program the owner adds that the Guard has no decoder for is passed on the owner's word.
 - **Anti-MEV Slippage Collar:** Directly inspects `slippage_bps` encoded in DEX swaps, bounding maximum acceptable slippage to eliminate sandwich vulnerability.
-- **Notional Size Caps:** Binds maximum USD exposure per order and throttles runaway trading loops.
+- **Notional Size Caps:** Binds maximum USD exposure per order and throttles runaway trading loops. Swaps and transfers are sized in the token they actually spend (USDC, USDT, SOL); a token the Guard can't price is refused, not guessed.
 - **Cryptographic Kill Switch:** Owner/Guardian Ed25519-signed endpoint immediately revokes an agent's trading authority without requiring on-chain transaction delays. Guardians may trip the kill switch, but only the registered owner can revive trading.
 - **Dual-Signature Multisig Enforcement:** Reference dual-signer execution vault specification and state machine (`guard/contracts_solana/`) enforcing both Agent signature and Guard Ed25519 co-signature for non-custodial agent risk isolation.
 
@@ -99,9 +99,16 @@ Hyperion Guard is built as a zero-overhead, sub-millisecond service within the H
 - **Compute Budget:** `ComputeBudget111111111111111111111111111111`. The priority fee (unit price times unit limit) counts toward the order cap.
 - **Associated Token Account:** `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL`. Opening a token account is allowed and its rent counted; `RecoverNested` is refused.
 
-**Checked against real mainnet transactions.** Six Jupiter transactions fetched from mainnet are kept as test fixtures ([`tests/fixtures/mainnet_jupiter.json`](guard/service/tests/fixtures/mainnet_jupiter.json)) and judged whole: compute budget, token-account setup, the wrap and unwrap of SOL, and the swap. Five are judged on slippage and size; the sixth closes a token account to another wallet and is refused.
+**Checked against real mainnet transactions.** Nine Jupiter transactions fetched from mainnet, with the lookup-table entries they use, are kept as test fixtures ([`tests/fixtures/mainnet_jupiter.json`](guard/service/tests/fixtures/mainnet_jupiter.json)) and judged whole: compute budget, token-account setup, the wrap and unwrap of SOL, and the swap. Five spend USDC or SOL and are sized to the cent; four sell a token the Guard has no price for and are refused.
 
-**Sizing limit.** A v0 transaction loads most accounts, usually including the swap's source mint, from address lookup tables, which the Guard doesn't fetch. When the mint is readable and is wrapped SOL, the swap is sized in SOL. Otherwise the input is read as a 6-decimal dollar token (right for USDC and USDT), which overstates a SOL swap about sixfold and can understate a high-priced token. Resolving lookup tables is the next step.
+**How a swap is sized.** A token amount is only a dollar figure if the Guard knows the token, so it finds out which token an instruction spends:
+
+1. **From the instruction's accounts**, where it names its source mint. A v0 transaction loads most accounts from address lookup tables; given an RPC node (`HYPERION_SOLANA_RPC_URL`) the Guard reads those tables and caches them.
+2. **From the wallet's own token account.** If the account being spent is the signer's associated token account for USDC, USDT or wrapped SOL, that settles it with no network call.
+
+USDC and USDT are taken at $1, wrapped SOL at the SOL price. Wrapping SOL into the wallet's own account isn't counted as spending it; the swap that follows is. **Anything else is refused** (`REJECTED_UNPRICED_TOKEN`): a token with no price, or one that couldn't be identified. The Guard no longer guesses.
+
+**What that leaves out.** An agent can buy any token with USDC or SOL through the Guard, but can't sell a token the Guard can't price. That needs a price feed per token, which is the next step. And the Guard believes its RPC node about a lookup table's contents.
 
 ---
 
@@ -164,8 +171,8 @@ cd guard/service
 - 15 Rust High-Performance Quant Engine Tests (`cargo test`)
 - 15 Solana vault tests: 5 unit, 10 integration against the compiled program in LiteSVM (`cd guard/contracts_solana && cargo build-sbf && cargo test`)
 - 27 EVM Guard & Calldata Decoder Tests (`forge test`)
-- 172 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
-- **Total: 229 automated tests, all passing**
+- 181 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
+- **Total: 238 automated tests, all passing**
 
 ### Jito MEV & Sandwich Attack Simulation Benchmarks
 
@@ -173,15 +180,15 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 
 | Metric / Scenario | Unprotected Agent (200 bps) | Hyperion Protected Agent (40 bps collar) |
 | :--- | :--- | :--- |
-| **Simulation Model** | Searcher computes optimal front-run | Intercepted pre-trade in **~45 µs** |
+| **Simulation Model** | Searcher computes optimal front-run | Intercepted pre-trade, before signing |
 | **Searcher Front-run** | Injects $76,366 USDC pushing spot to $153.07 | **Blocked** (Zero victim tx to bundle) |
 | **Searcher Gross Profit** | +$121.63 USDC (75% to Jito Validator) | $0.00 USDC (Searcher drops bundle) |
 | **Agent Capital Loss** | **-$497.10 USDC (-2.0% loss)** | **$0.00 USDC (100% Protected)** |
 | **Ed25519 Co-Signature** | N/A | **WITHHELD** (`REJECTED_EXCESSIVE_SLIPPAGE`) |
-| **Median Guard Latency**| N/A | **25.7 µs (0.026 ms)** |
+| **Median Guard Latency**| N/A | **32 µs** to refuse; **0.36 ms** to approve and sign |
 
 > [!NOTE]
-> Hyperion Guard's median evaluation latency of **~26 µs** consumes less than **0.01%** of Solana's 400 ms slot time.
+> Measured on a laptop, in Python: a refusal takes a median of **32 µs**; an approval takes **0.36 ms**, nearly all of it the Ed25519 signature. Both are under 0.1% of Solana's 400 ms slot. Two things cost more, once each: the first transaction from a wallet (about 0.3 to 0.8 ms to work out its token accounts), and the first use of a lookup table, which is a network call to the RPC node.
 
 ---
 

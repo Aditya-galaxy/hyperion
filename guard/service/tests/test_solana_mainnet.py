@@ -24,12 +24,20 @@ from hyperion_guard.solana.decoder import (
     JUPITER_ROUTES,
     JUPITER_V6_PROGRAM_ID,
     SPL_TOKEN_PROGRAM_ID,
+    SYSTEM_PROGRAM_ID,
     UNRESOLVED_ACCOUNT,
+    USDC_MINT,
     WSOL_MINT,
+    associated_token_address,
     decode_jupiter_instruction,
     decode_solana_transaction,
 )
 from hyperion_guard.solana.guard import SolanaAgentPolicy, SolanaGuardEngine
+from hyperion_guard.solana.lookup import (
+    LOOKUP_TABLE_META_SIZE,
+    RpcLookupTables,
+    parse_lookup_table,
+)
 from hyperion_guard.solana.tx import compile_message, pubkey, serialize, sign
 
 FIXTURES = json.loads((Path(__file__).parent / "fixtures" / "mainnet_jupiter.json").read_text())
@@ -38,17 +46,35 @@ VAULT_PID = b58encode(bytes([7] * 32))
 SOL = 1_000_000_000
 
 
-def judge_real(raw: bytes, **policy):
+class RecordedTable:
+    """A lookup table as recorded in the fixtures: only the indexes the transactions use."""
+
+    def __init__(self, entries: dict[str, str]):
+        self.entries = entries
+
+    def __len__(self) -> int:
+        return max(map(int, self.entries)) + 1
+
+    def __getitem__(self, i: int) -> str:
+        return self.entries.get(str(i), UNRESOLVED_ACCOUNT)
+
+
+def recorded_tables(table: str, highest_index: int):
+    entries = FIXTURES["lookup_tables"].get(table)
+    return RecordedTable(entries) if entries else None
+
+
+def judge_real(raw: bytes, tables=recorded_tables, **policy):
     """The fixtures weren't built for a Guard, so it isn't one of their signers."""
-    guard = SolanaGuardEngine()
+    guard = SolanaGuardEngine(lookup_tables=tables)
     guard.set_policy(SolanaAgentPolicy(agent_id="a", owner_solana_pubkey="owner", require_guard_signer=False,
                                        **{"max_order_notional_usd": 1e12, "daily_notional_cap_usd": 1e13,
                                           "max_slippage_bps": 10_000, **policy}))
-    return guard.evaluate_transaction("a", raw)
+    return guard.evaluate_transaction("a", raw, sol_price_usd=150.0)
 
 
-def jupiter(raw: bytes):
-    return [i for i in decode_solana_transaction(raw).instructions if i.program_id == JUPITER_V6_PROGRAM_ID]
+def jupiter(raw: bytes, tables=recorded_tables):
+    return [i for i in decode_solana_transaction(raw, tables).instructions if i.program_id == JUPITER_V6_PROGRAM_ID]
 
 
 def test_discriminators_are_the_anchor_hash_of_the_instruction_name():
@@ -57,45 +83,92 @@ def test_discriminators_are_the_anchor_hash_of_the_instruction_name():
         assert hashlib.sha256(f"global:{snake}".encode()).digest()[:8].hex() == disc, name
 
 
-@pytest.mark.parametrize(("sig", "name", "amount", "slippage"), [
-    ("XpERyrRh", "sharedAccountsRouteV2", 300_000_000, 100),
-    ("2wisuJyL", "routeV2", 88_593_387_179, 1_000),
-    ("3fhAEwFp", "route", 154_775_577, 100),
-    ("3gXMDJBu", "route", 1_182_020_282_387, 10_000),
+@pytest.mark.parametrize(("sig", "name", "amount", "slippage", "mint", "usd"), [
+    ("XpERyrRh", "sharedAccountsRouteV2", 300_000_000, 100, USDC_MINT, 300.02),     # 300 USDC and a priority fee
+    ("3LxXkHXS", "routeV2", 47_000_000, 100, USDC_MINT, 47.36),                     # 47 USDC, a new token account
+    ("2hYARrmD", "routeV2", 120_540_278, 4_500, USDC_MINT, 122.72),                 # and two USDC fee transfers
+    ("4VfVbP9n", "routeV2", 50_000_000, 2_000, WSOL_MINT, 7.81),                    # 0.05 SOL, wrapped first
+    ("3fhAEwFp", "route", 154_775_577, 100, WSOL_MINT, 23.53),                      # 0.155 SOL, wrapped first
 ])
-def test_real_swaps_decode_and_are_judged_on_their_merits(sig, name, amount, slippage):
+def test_real_swaps_are_sized_in_the_token_they_spend(sig, name, amount, slippage, mint, usd):
     (ix,) = jupiter(REAL[sig])
-    assert (ix.operation, ix.details["instruction_name"], ix.input_amount, ix.slippage_bps) == (
-        "JUPITER_SWAP", name, amount, slippage)
+    assert (ix.operation, ix.details["instruction_name"], ix.input_amount, ix.slippage_bps, ix.details["source_mint"]) == (
+        "JUPITER_SWAP", name, amount, slippage, mint)
+    assert decode_solana_transaction(REAL[sig], recorded_tables).unresolved_accounts == 0
 
-    assert judge_real(REAL[sig]).approved                                  # nothing in it is refused outright
+    assert judge_real(REAL[sig], max_order_notional_usd=usd + 0.01).approved
+    under = judge_real(REAL[sig], max_order_notional_usd=usd - 0.01)
+    assert (under.approved, under.status) == (False, "REJECTED_ORDER_CAP")
     tight = judge_real(REAL[sig], max_slippage_bps=slippage - 1)
     assert (tight.approved, tight.status) == (False, "REJECTED_EXCESSIVE_SLIPPAGE")
-    small = judge_real(REAL[sig], max_order_notional_usd=amount / 1e6 - 1)
-    assert (small.approved, small.status) == (False, "REJECTED_ORDER_CAP")
 
 
-def test_a_real_legacy_transaction_with_two_swaps_and_a_readable_source_mint():
-    first, second = jupiter(REAL["2bf8G4ur"])
-    assert (first.details["instruction_name"], first.details["source_mint"]) == ("routeV2", WSOL_MINT)
-    assert (first.input_amount, second.input_amount) == (3_482_636_000, 11_257_065_530_000)
-    assert judge_real(REAL["2bf8G4ur"]).approved
+@pytest.mark.parametrize(("sig", "token"), [
+    ("2wisuJyL", "9ANVLB4L"),      # read as an $88,593 dollar swap before the Guard resolved lookup tables
+    ("5RCa41rE", "HAPPYwgF"),
+    ("2bf8G4ur", "AsrX7Lug"),      # two swaps: the first spends SOL, the second this
+])
+def test_real_swaps_of_a_token_with_no_price_are_refused(sig, token):
+    verdict = judge_real(REAL[sig])
+    assert (verdict.approved, verdict.status, verdict.cosigner_signature_b58) == (False, "REJECTED_UNPRICED_TOKEN", None)
+    assert f"spends token {token}" in verdict.violation_details
 
 
-def test_a_real_swap_that_closes_a_token_account_to_someone_else_is_refused():
-    verdict = judge_real(REAL["5RCa41rE"])
-    assert (verdict.approved, verdict.status) == (False, "REJECTED_UNSUPPORTED_INSTRUCTION")
-    assert "CloseAccount" in verdict.violation_details
+def test_a_real_swap_whose_token_cant_be_identified_is_refused():
+    """`route` doesn't name its source mint, and the account it spends isn't the
+    wallet's USDC, USDT or wrapped-SOL account."""
+    (ix,) = jupiter(REAL["3gXMDJBu"])
+    assert "source_mint" not in ix.details
+    verdict = judge_real(REAL["3gXMDJBu"])
+    assert (verdict.status, "couldn't be identified" in verdict.violation_details) == ("REJECTED_UNPRICED_TOKEN", True)
 
 
-def test_real_transactions_keep_lookup_table_accounts_in_place():
-    """v0 transactions load most accounts from lookup tables. They must stay as
-    placeholders, at their positions, not vanish and shift the rest."""
-    decoded = decode_solana_transaction(REAL["2wisuJyL"])
-    assert decoded.is_versioned
-    (ix,) = jupiter(REAL["2wisuJyL"])
-    assert (len(ix.accounts), ix.accounts.count(UNRESOLVED_ACCOUNT)) == (39, 26)
-    assert "source_mint" not in ix.details                                 # it's in a lookup table: unknown, not guessed
+def test_without_lookup_tables_accounts_stay_in_place_and_unknown():
+    """v0 transactions load most accounts from lookup tables. Unread, they are
+    placeholders at their positions, not gaps that shift the rest."""
+    decoded = decode_solana_transaction(REAL["2hYARrmD"])
+    assert (decoded.is_versioned, len(decoded.lookup_tables), decoded.unresolved_accounts) == (True, 5, 46)
+    (ix,) = jupiter(REAL["2hYARrmD"], tables=None)
+    assert (len(ix.accounts), ix.accounts.count(UNRESOLVED_ACCOUNT)) == (82, 49)
+    assert "source_mint" not in ix.details                                 # unknown, not guessed
+
+    verdict = judge_real(REAL["2hYARrmD"], tables=None)                    # approved once the tables are read
+    assert verdict.status == "REJECTED_UNPRICED_TOKEN"
+    assert "46 of the transaction's accounts are in lookup tables" in verdict.violation_details
+
+
+def test_the_wallets_own_token_account_identifies_the_token_without_any_lookup():
+    """`route` on a v0 transaction, no tables read: the account it spends is the
+    signer's wrapped-SOL account, which can be worked out from the two addresses."""
+    (ix,) = jupiter(REAL["3fhAEwFp"], tables=None)
+    assert ix.details["source_mint"] == WSOL_MINT
+    assert judge_real(REAL["3fhAEwFp"], tables=None, max_order_notional_usd=24.0).approved
+
+
+def test_a_table_that_cant_be_read_leaves_its_accounts_unknown():
+    def broken(table: str, highest_index: int):
+        raise TimeoutError("rpc down")
+    assert decode_solana_transaction(REAL["2hYARrmD"], broken).unresolved_accounts == 46
+    short = decode_solana_transaction(REAL["2hYARrmD"], lambda table, hi: [])     # a table shorter than the index used
+    assert short.unresolved_accounts == 46
+
+
+def test_rpc_lookup_tables_parse_cache_and_refetch_when_a_table_has_grown(monkeypatch):
+    addresses = [b58encode(bytes([i]) * 32) for i in range(1, 4)]
+    data = bytes(LOOKUP_TABLE_META_SIZE) + b"".join(bytes([i]) * 32 for i in range(1, 4))
+    assert parse_lookup_table(data) == addresses
+    with pytest.raises(ValueError):
+        parse_lookup_table(data[:-1])
+
+    calls = []
+    rpc = RpcLookupTables("http://unused")
+    monkeypatch.setattr(rpc, "fetch", lambda table: calls.append(table) or addresses[:2 + len(calls) - 1])
+    assert rpc("T", 1) == addresses[:2]
+    assert rpc("T", 0) == addresses[:2] and len(calls) == 1               # cached
+    assert rpc("T", 2) == addresses and len(calls) == 2                   # index past the cache: fetched again
+    monkeypatch.setattr(rpc, "fetch", lambda table: None)
+    assert rpc("T", 9) == addresses                                       # not a table any more: keep what was known
+    assert rpc("other", 0) is None
 
 
 # ── the pieces, on built transactions ─────────────────────────────────────────
@@ -174,8 +247,22 @@ def test_a_swap_from_wrapped_sol_is_sized_in_sol(judge):
     assert ok.approved, ok.violation_details
     over = judge((JUPITER_V6_PROGRAM_ID, route_v2(SOL), [*filler, WSOL_MINT]))               # 1 SOL = $150
     assert over.status == "REJECTED_ORDER_CAP"
-    # an unknown mint falls back to the 6-decimal assumption: 0.5e9 raw reads as $500
-    assert judge((JUPITER_V6_PROGRAM_ID, route_v2(SOL // 2), [*filler, filler[0]])).status == "REJECTED_ORDER_CAP"
+    # a token the Guard has no price for isn't guessed at
+    assert judge((JUPITER_V6_PROGRAM_ID, route_v2(5), [*filler, filler[0]])).status == "REJECTED_UNPRICED_TOKEN"
+
+
+def test_wrapping_sol_isnt_counted_as_spending_it(judge):
+    wsol_account = associated_token_address(judge.agent, WSOL_MINT)
+    wrap = struct.pack("<IQ", 2, 100 * SOL)
+    def sent_to(dest: str):
+        ix = v.Ix(SYSTEM_PROGRAM_ID, [v.AccountMeta(judge.agent, True, True), v.AccountMeta(dest, False, True),
+                                      v.AccountMeta(judge.guard.pubkey_b58, True, False)], wrap)
+        msg, keys, n = compile_message([ix], judge.agent, b58encode(os.urandom(32)))
+        return judge.guard.evaluate_transaction("a", serialize(msg, keys, n, {}), sol_price_usd=150.0)
+    assert sent_to(wsol_account).approved                                  # still the agent's: $15,000 moved, $0 spent
+    assert sent_to(b58encode(os.urandom(32))).status == "REJECTED_ORDER_CAP"
+    someone_elses = associated_token_address(b58encode(os.urandom(32)), WSOL_MINT)
+    assert sent_to(someone_elses).status == "REJECTED_ORDER_CAP"
 
 
 def test_exact_out_is_sized_at_the_most_it_can_spend():

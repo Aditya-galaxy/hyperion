@@ -15,6 +15,9 @@ from hyperion_guard.solana import vault as v
 from hyperion_guard.solana.base58 import b58encode
 from hyperion_guard.solana.decoder import (
     RAYDIUM_V4_PROGRAM_ID,
+    USDC_MINT,
+    WSOL_MINT,
+    associated_token_address,
     decode_raydium_instruction,
     decode_solana_transaction,
 )
@@ -62,16 +65,20 @@ def world():
     guard.set_policy(SolanaAgentPolicy(agent_id="a", owner_solana_pubkey=owner, max_order_notional_usd=1_000.0,
                                        allowed_programs=[VAULT_PID, RAYDIUM_V4_PROGRAM_ID], vault_address=vault))
 
-    def judge(data: bytes, through_vault: bool = False):
-        # the Guard is a read-only signer of the Raydium call, as it would be of any co-signed transaction
-        ix = v.Ix(RAYDIUM_V4_PROGRAM_ID, [v.AccountMeta(agent, True, True),
-                                          v.AccountMeta(guard.pubkey_b58, True, False)], data)
+    def judge(data: bytes, through_vault: bool = False, mint: str = USDC_MINT):
+        # every Raydium swap ends [user source token account, user destination, user owner]
+        owner = vault if through_vault else agent
+        pool = [v.AccountMeta(b58encode(os.urandom(32)), False, True) for _ in range(5)]
+        metas = [*pool, v.AccountMeta(associated_token_address(owner, mint), False, True),
+                 v.AccountMeta(b58encode(os.urandom(32)), False, True), v.AccountMeta(owner, True, False)]
         if through_vault:
-            inner = v.Ix(RAYDIUM_V4_PROGRAM_ID, [v.AccountMeta(vault, True, True)], data)
-            ix = v.execute(VAULT_PID, vault, agent, guard.pubkey_b58, inner)
+            ix = v.execute(VAULT_PID, vault, agent, guard.pubkey_b58, v.Ix(RAYDIUM_V4_PROGRAM_ID, metas, data))
+        else:
+            # the Guard is a read-only signer, as it would be of any co-signed transaction
+            ix = v.Ix(RAYDIUM_V4_PROGRAM_ID, [v.AccountMeta(guard.pubkey_b58, True, False), *metas], data)
         msg, keys, n = compile_message([ix], agent, b58encode(os.urandom(32)))
         raw = serialize(msg, keys, n, {agent: sign(msg, agent_key)})
-        return guard.evaluate_transaction("a", raw), decode_solana_transaction(raw).instructions[0]
+        return guard.evaluate_transaction("a", raw, sol_price_usd=150.0), decode_solana_transaction(raw).instructions[0]
     return judge
 
 
@@ -92,3 +99,15 @@ def test_the_guard_sizes_and_limits_raydium_swaps(world, through_vault):
 
     withdraw, _ = world(bytes([4]) + struct.pack("<Q", 10**9), through_vault)
     assert (withdraw.approved, withdraw.status) == (False, "REJECTED_MALFORMED_INSTRUCTION")
+
+
+@pytest.mark.parametrize("through_vault", [False, True])
+def test_a_raydium_swap_is_sized_in_the_token_it_spends(world, through_vault):
+    sol, _ = world(swap(9, 3 * 10**9, 1), through_vault, mint=WSOL_MINT)        # 3 SOL = $450 of a $1,000 cap
+    assert sol.approved, sol.violation_details
+    too_much_sol, _ = world(swap(9, 8 * 10**9, 1), through_vault, mint=WSOL_MINT)   # 8 SOL = $1,200
+    assert too_much_sol.status == "REJECTED_ORDER_CAP"
+
+    bonk = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+    unpriced, _ = world(swap(9, 5, 1), through_vault, mint=bonk)                 # its token account isn't one the Guard can place
+    assert (unpriced.approved, unpriced.status) == (False, "REJECTED_UNPRICED_TOKEN")

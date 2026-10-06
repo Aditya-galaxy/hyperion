@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import os
 import re
 from typing import Annotated
 
@@ -27,6 +28,7 @@ from .engine import ExecutorCall, Guard, GuardUnavailable, parse_order
 from .solana import SolanaAgentPolicy, SolanaGuardEngine, b58decode
 from .solana.control import action_message, policy_message
 from .solana.decoder import ALLOWLISTED_PROGRAMS
+from .solana.lookup import RpcLookupTables
 
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
 HEX = re.compile(r"^0x([0-9a-fA-F]{2})*$")
@@ -43,7 +45,11 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
                   description="Pre-trade risk checks for autonomous trading agents, with multi-chain protection (Arc EVM + Solana).")
     signer = Account.from_key(guard.signer_key).address if guard else None
     if solana_guard is None:
-        solana_guard = SolanaGuardEngine()
+        # With an RPC node the Guard reads the address lookup tables v0 transactions use,
+        # so it can tell which token a swap spends. Without one, a swap whose token can't
+        # be told from the transaction alone is refused.
+        rpc_url = os.environ.get("HYPERION_SOLANA_RPC_URL")
+        solana_guard = SolanaGuardEngine(lookup_tables=RpcLookupTables(rpc_url) if rpc_url else None)
 
     @app.get("/v1/health")
     def health():
