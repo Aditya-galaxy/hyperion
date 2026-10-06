@@ -57,9 +57,24 @@ compiled `target/deploy/hyperion_solana_vault.so` into
 LiteSVM's dependencies need Rust 1.97 or later. The on-chain build uses
 `cargo build-sbf`'s own compiler.
 
+## On devnet
+
+Program id [`9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq`](https://explorer.solana.com/address/9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq?cluster=devnet), deployed with `solana program deploy`.
+[`guard/demo/solana_devnet.py`](../demo/solana_devnet.py) runs six scenes
+against it with the Python client and the Guard. One run:
+
+| Scene | What happened | Transaction |
+|---|---|---|
+| 1 | Owner opens the vault and funds it | [51Q1D1…](https://explorer.solana.com/tx/51Q1D13asYWch5q5DKWMJwaNtsdiVeVmnL1xEfADQXZ1FspAaAqGtGBCpYkE7fSot8nkLe9h2BnryctgmYVJQrKd?cluster=devnet) |
+| 2 | Guard co-signs a $3 payment; the vault pays | [2F3edF…](https://explorer.solana.com/tx/2F3edF9ocehyenzUvrp9tDgDZXcHqQhZFPAmMb2pcCd3NT3s9sCvknjCMkhLQWCkHsoz6eqD3epBwdKRPEdieXD7?cluster=devnet) |
+| 3 | Agent skips the Guard; the program fails it with `Custom(3)` MissingGuardCoSignature | [yTo6an…](https://explorer.solana.com/tx/yTo6an7jYUouBWWMZzMzVzYTfNgpFwpkKevGiaeo7cqJLxG5ZLpiBbWG96wV7umiP21KvV1wXUJr9ZipxwXfGEh?cluster=devnet) |
+| 4 | A $6 order against a $5 cap; the Guard won't sign | none: nothing to send |
+| 5 | Guardian kills the vault | [5dEKRQ…](https://explorer.solana.com/tx/5dEKRQGU4DtniJ1mNr9qumunZEzDz79SGo12PZ1DgPCR1T4ifucrKFJNMKhjzcyeqsZ138tqLds17LaLbHw6LRMU?cluster=devnet) |
+| 5 | A transfer the Guard approved before the kill fails with `Custom(4)` VaultKilled | [62diUw…](https://explorer.solana.com/tx/62diUwm9B769pnPa2d8mVttaFPbrCSBe9cmXfkPT2y74q4GoQwomd3bQwgTtgKCbGvBf3nuPVkUQ6U3uGTfY7BzV?cluster=devnet) |
+| 6 | Owner withdraws from the killed vault | [2WesDi…](https://explorer.solana.com/tx/2WesDiZqG7xbyNWeb9Xw8WXtrh4xmaaqvwBcHA9Sw3mupUKqYeH4Z2mtynMxqZVNp5xDzGLPiMVdJMpBoHKfSMMa?cluster=devnet) |
+
 ## Not yet
 
-- **Not deployed to devnet yet.**
 - **Token amounts aren't capped on-chain.** Only SOL is (`TransferSol`). Token
   sizes inside `Execute` rely on the Guard's co-signature over the exact
   instruction.

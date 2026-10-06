@@ -14,7 +14,7 @@
 
 Autonomous trading agents on Solana are rapidly executing across Jupiter, Phoenix LOB, and Raydium. However, autonomous agents suffer from failure modes: model hallucinations, prompt injection attacks, stale pricing, and toxic sandwich MEV exploitation by searchers. Because Solana processes blocks in ~400ms, **post-trade monitoring is a post-mortem**. 
 
-**Hyperion Guard** is an institutional pre-trade risk gateway and cryptographic co-signer designed for the Solana agentic economy (prototype). Before any raw Solana transaction payload reaches validators, Hyperion Guard intercepts the wire bytes, decodes the compiled instructions (supporting Jupiter V6, Phoenix, Raydium, and SPL Token programs), checks strict risk firewalls, and co-signs compliant transactions with an authorized Ed25519 key. If an agent hallucinates an excessive swap size, accepts toxic slippage, or is targeted by an unapproved program, the Guard rejects the transaction before a single lamport is risked.
+**Hyperion Guard** is an institutional pre-trade risk gateway and cryptographic co-signer designed for the Solana agentic economy (prototype). Before any raw Solana transaction payload reaches validators, Hyperion Guard intercepts the wire bytes, decodes the compiled instructions (Jupiter V6, Phoenix, SPL Token, System and the Guarded Vault; Raydium can be allow-listed but its instructions aren't decoded yet), checks strict risk firewalls, and co-signs compliant transactions with an authorized Ed25519 key. If an agent hallucinates an excessive swap size, accepts toxic slippage, or is targeted by an unapproved program, the Guard rejects the transaction before a single lamport is risked.
 
 ---
 
@@ -59,7 +59,7 @@ Hyperion Guard acts as an institutional pre-trade co-signing firewall:
 
 ### Core Firewalls
 - **Deterministic Program Allowlisting:** Dissects compiled transaction account keys. Rejects any transaction interacting with unauthorized programs or drainers.
-- **Deep DEX Instruction Decoding:** Native unpacking of Anchor 8-byte discriminators and variable-length route plans with 19-byte parameter suffixes for Jupiter V6 (`sharedAccountsRoute`, `route`), Phoenix LOB (`newOrder`, `swap`), and Raydium CPMM.
+- **Deep DEX Instruction Decoding:** Native unpacking of Anchor 8-byte discriminators and variable-length route plans with 19-byte parameter suffixes for Jupiter V6 (`sharedAccountsRoute`, `route`), and Phoenix LOB (`newOrder`, `swap`). Raydium is not decoded yet.
 - **Anti-MEV Slippage Collar:** Directly inspects `slippage_bps` encoded in DEX swaps, bounding maximum acceptable slippage to eliminate sandwich vulnerability.
 - **Notional Size Caps:** Binds maximum USD exposure per order and throttles runaway trading loops.
 - **Cryptographic Kill Switch:** Owner/Guardian Ed25519-signed endpoint immediately revokes an agent's trading authority without requiring on-chain transaction delays. Guardians may trip the kill switch, but only the registered owner can revive trading.
@@ -77,12 +77,12 @@ Hyperion Guard is built as a zero-overhead, sub-millisecond service within the H
 | **Wire Transaction Decoder** | [`guard/service/hyperion_guard/solana/decoder.py`](guard/service/hyperion_guard/solana/decoder.py) | Compact-u16 parser, legacy & V0 transaction header decoding, compiled instruction resolution, and Anchor DEX discriminator + suffix unpacking. |
 | **Pre-Trade Risk Engine** | [`guard/service/hyperion_guard/solana/guard.py`](guard/service/hyperion_guard/solana/guard.py) | Real-time policy evaluation, rate limiting, kill switch state machine, co-signer presence verification, and RFC 8032 Ed25519 message signing. |
 | **REST API Gateway** | [`guard/service/hyperion_guard/api.py`](guard/service/hyperion_guard/api.py) | High-throughput FastAPI endpoints (`/v1/solana/check`, `/v1/solana/policy`, `/v1/solana/kill`, `/v1/solana/revive`, `/v1/solana/health`). |
-| **Guarded Vault (Solana program)** | [`guard/contracts_solana/`](guard/contracts_solana/) | Native Solana program, compiled with `cargo build-sbf`. Every agent action (TransferSol, Execute) needs the agent's and the Guard's signatures, a vault that isn't killed, a cap or an allow-listed target; the vault signs inner calls as a PDA. Guardian can kill, only the owner can revive, set policy or withdraw (even when killed). 9 integration tests run the compiled program in LiteSVM. Devnet deployment pending. |
+| **Guarded Vault (Solana program)** | [`guard/contracts_solana/`](guard/contracts_solana/) | Native Solana program, compiled with `cargo build-sbf`. Every agent action (TransferSol, Execute) needs the agent's and the Guard's signatures, a vault that isn't killed, a cap or an allow-listed target; the vault signs inner calls as a PDA. Guardian can kill, only the owner can revive, set policy or withdraw (even when killed). Tests run the compiled program in LiteSVM, including transactions built in Python and co-signed by the Guard. **Deployed on devnet:** [`9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq`](https://explorer.solana.com/address/9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq?cluster=devnet). |
 
 ### Supported Solana Protocols
 - **Jupiter V6 Aggregator:** `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4`
 - **Phoenix Limit Order Book:** `PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY`
-- **Raydium V4 CPMM:** `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8`
+- **Raydium AMM V4 (allow-listed, not decoded):** `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8`
 - **SPL Token Program:** `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`
 - **Solana System Program:** `11111111111111111111111111111111`
 
@@ -169,13 +169,29 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 
 ## 7. 2.5-Minute Video Pitch & Demo Script
 
+### Live on devnet: the six scenes to record
+
+`python guard/demo/solana_devnet.py` runs these against the deployed program and prints an explorer link for each. One recorded run (2026-10-06):
+
+| Scene | What happened | Transaction |
+|---|---|---|
+| 1 | Owner opens the vault and funds it | [51Q1D1…](https://explorer.solana.com/tx/51Q1D13asYWch5q5DKWMJwaNtsdiVeVmnL1xEfADQXZ1FspAaAqGtGBCpYkE7fSot8nkLe9h2BnryctgmYVJQrKd?cluster=devnet) |
+| 2 | Guard co-signs a $3 payment; the vault pays | [2F3edF…](https://explorer.solana.com/tx/2F3edF9ocehyenzUvrp9tDgDZXcHqQhZFPAmMb2pcCd3NT3s9sCvknjCMkhLQWCkHsoz6eqD3epBwdKRPEdieXD7?cluster=devnet) |
+| 3 | Agent skips the Guard; the program fails it with `Custom(3)` MissingGuardCoSignature | [yTo6an…](https://explorer.solana.com/tx/yTo6an7jYUouBWWMZzMzVzYTfNgpFwpkKevGiaeo7cqJLxG5ZLpiBbWG96wV7umiP21KvV1wXUJr9ZipxwXfGEh?cluster=devnet) |
+| 4 | A $6 order against a $5 cap; the Guard won't sign | none: nothing to send |
+| 5 | Guardian kills the vault | [5dEKRQ…](https://explorer.solana.com/tx/5dEKRQGU4DtniJ1mNr9qumunZEzDz79SGo12PZ1DgPCR1T4ifucrKFJNMKhjzcyeqsZ138tqLds17LaLbHw6LRMU?cluster=devnet) |
+| 5 | A transfer the Guard approved before the kill fails with `Custom(4)` VaultKilled | [62diUw…](https://explorer.solana.com/tx/62diUwm9B769pnPa2d8mVttaFPbrCSBe9cmXfkPT2y74q4GoQwomd3bQwgTtgKCbGvBf3nuPVkUQ6U3uGTfY7BzV?cluster=devnet) |
+| 6 | Owner withdraws from the killed vault | [2WesDi…](https://explorer.solana.com/tx/2WesDiZqG7xbyNWeb9Xw8WXtrh4xmaaqvwBcHA9Sw3mupUKqYeH4Z2mtynMxqZVNp5xDzGLPiMVdJMpBoHKfSMMa?cluster=devnet) |
+
+Each run makes a fresh agent, guardian and Guard key and so a fresh vault; the links above are from one run.
+
 ### Scene 1: The Problem (0:00 - 0:35)
 - **Visual:** High-speed terminal showing Solana AI trading agents firing automated trades. Screen cuts to an alert showing an agent losing funds to a 500 bps slippage sandwich attack on Jupiter.
 - **Voiceover:** "Autonomous AI agents are executing DeFi trades on Solana. They analyze orderbooks, spot arbitrage, and execute swaps in milliseconds. But autonomous trading without guardrails can be catastrophic. Hallucinations, bad quotes, and aggressive MEV searchers can drain an agent's treasury in a single block. Because Solana finalizes blocks in 400 milliseconds, reactive alerts only tell you what you’ve already lost."
 
 ### Scene 2: Introducing Hyperion Guard (0:35 - 1:15)
 - **Visual:** Architectural graphic showing an AI agent sending raw transactions to Hyperion Guard, which validates the instructions in microseconds and co-signs them.
-- **Voiceover:** "Meet Hyperion Guard: an institutional pre-trade risk firewall for autonomous Solana agents. Hyperion Guard inspects compiled wire transactions *before* they touch the network. It parses the actual Anchor byte stream of Jupiter V6 swaps, Phoenix LOB orders, and Raydium liquidity routes, enforcing mathematical risk collars before signing."
+- **Voiceover:** "Meet Hyperion Guard: an institutional pre-trade risk firewall for autonomous Solana agents. Hyperion Guard inspects compiled wire transactions *before* they touch the network. It parses the actual Anchor byte stream of Jupiter V6 swaps, and Phoenix LOB orders, enforcing mathematical risk collars before signing."
 
 ### Scene 3: Live Demo — Safe Trade vs. MEV Exploit (1:15 - 1:55)
 - **Visual:** Split-screen terminal.
@@ -189,7 +205,7 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 
 ### Scene 5: Conclusion & Future Roadmap (2:15 - 2:30)
 - **Visual:** Links to GitHub repository, Colosseum submission portal, and documentation.
-- **Voiceover:** "Hyperion Guard is an open-source, fully tested pre-trade risk engine across Jupiter, Phoenix, and Raydium. Inspect our open-source implementation on GitHub. Built for the Colosseum Arena Hackathon."
+- **Voiceover:** "Hyperion Guard is an open-source, fully tested pre-trade risk engine for Jupiter and Phoenix, with a Guarded Vault program live on devnet. Inspect our open-source implementation on GitHub. Built for the Colosseum Arena Hackathon."
 
 ---
 
@@ -197,6 +213,7 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 
 - **GitHub Repository:** [https://github.com/Aditya-galaxy/hyperion](https://github.com/Aditya-galaxy/hyperion)
 - **Solana Guard Module:** [`guard/service/hyperion_guard/solana/`](guard/service/hyperion_guard/solana/)
-- **Solana Guarded Vault program (built and tested; devnet deployment pending):** [`guard/contracts_solana/`](guard/contracts_solana/)
+- **Solana Guarded Vault program, on devnet:** [`9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq`](https://explorer.solana.com/address/9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq?cluster=devnet); source in [`guard/contracts_solana/`](guard/contracts_solana/)
+- **Live devnet demo:** [`guard/demo/solana_devnet.py`](guard/demo/solana_devnet.py), six scenes, each a real transaction (links in section 7)
 - **Jito MEV Simulation Harness:** [`scripts/jito_mev_harness.py`](scripts/jito_mev_harness.py)
 - **Test Suite:** [`guard/service/tests/test_solana_guard.py`](guard/service/tests/test_solana_guard.py)
