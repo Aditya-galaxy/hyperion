@@ -46,6 +46,10 @@ UNRESOLVED_ACCOUNT = "<address-lookup-table>"
 # (6 decimals, taken at $1) and wrapped SOL (9 decimals, at the SOL price).
 PRICED_MINTS = (USDC_MINT, USDT_MINT, WSOL_MINT)
 
+# Given a token account's address, return the mint it holds (or None if it isn't
+# a live token account).
+TokenAccounts = Callable[[str], str | None]
+
 # Given a lookup table's address and the highest index a transaction uses in
 # it, return the table's addresses in order (or None if it can't be read).
 LookupTables = Callable[[str, int], Sequence[str] | None]
@@ -96,6 +100,18 @@ def source_mint(accounts: list[str], mint_at: int | None, owner_at: int | None, 
         except ValueError:
             return None
     return None
+
+
+def note_source(details: dict[str, Any], accounts: list[str], mint_at: int | None, owner_at: int | None,
+                token_account_at: int | None) -> None:
+    """Record what an instruction spends: `source_mint` if it can be told from
+    the transaction, else `source_token_account`, the account to look the mint
+    up from (see lookup.RpcTokenAccounts)."""
+    mint = source_mint(accounts, mint_at, owner_at, token_account_at)
+    if mint:
+        details["source_mint"] = mint
+    elif _at(accounts, token_account_at):
+        details["source_token_account"] = _at(accounts, token_account_at)
 
 
 @dataclass
@@ -179,9 +195,7 @@ def decode_jupiter_instruction(data: bytes, accounts: list[str]) -> tuple[str, i
         return "UNKNOWN_JUPITER", None, None, None, {"discriminator": discriminator, "error": f"unrecognized Jupiter discriminator {discriminator}"}
     route_name, layout, exact_out, mint_at, owner_at, token_account_at = route
     details: dict[str, Any] = {"instruction_name": route_name, "discriminator": discriminator}
-    mint = source_mint(accounts, mint_at, owner_at, token_account_at)
-    if mint:
-        details["source_mint"] = mint
+    note_source(details, accounts, mint_at, owner_at, token_account_at)
 
     try:
         if layout == "ledger":
@@ -308,9 +322,8 @@ def decode_raydium_instruction(data: bytes, accounts: list[str]) -> tuple[str, i
     details: dict[str, Any] = {"instruction_name": name, "in_amount_raw": in_amount, "out_amount_raw": out_amount,
                                "exact": "in" if "BaseIn" in name else "out", "unbounded": unbounded}
     # every swap form ends: user source token account, user destination token account, user owner
-    mint = source_mint(accounts, None, -1, -3) if len(accounts) >= 8 else None
-    if mint:
-        details["source_mint"] = mint
+    if len(accounts) >= 8:
+        note_source(details, accounts, None, -1, -3)
     return "RAYDIUM_SWAP", in_amount, out_amount, None, details
 
 
@@ -336,17 +349,15 @@ def decode_spl_token_instruction(data: bytes, accounts: list[str]) -> tuple[str,
     if ins_type == 3 and len(data) >= 9: # Transfer
         amount = struct.unpack_from("<Q", data, 1)[0]
         details: dict[str, Any] = {"type": "Transfer", "amount": amount}
-        mint = source_mint(accounts, None, 2, 0) if len(accounts) >= 3 else None       # [source, destination, authority]
-        if mint:
-            details["source_mint"] = mint
+        if len(accounts) >= 3:
+            note_source(details, accounts, None, 2, 0)                                 # [source, destination, authority]
         return "TOKEN_TRANSFER", amount, None, None, details
     elif ins_type == 12 and len(data) >= 10: # TransferChecked
         amount = struct.unpack_from("<Q", data, 1)[0]
         decimals = data[9]
         details = {"type": "TransferChecked", "amount": amount, "decimals": decimals}
-        mint = source_mint(accounts, 1, 3, 0) if len(accounts) >= 4 else None          # [source, mint, destination, authority]
-        if mint:
-            details["source_mint"] = mint
+        if len(accounts) >= 4:
+            note_source(details, accounts, 1, 3, 0)                                    # [source, mint, destination, authority]
         return "TOKEN_TRANSFER_CHECKED", amount, None, None, details
 
     name = SPL_TOKEN_INSTRUCTIONS.get(ins_type, f"instruction {ins_type}")

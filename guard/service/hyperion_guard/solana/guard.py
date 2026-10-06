@@ -29,6 +29,7 @@ from .decoder import (
     USDT_MINT,
     WSOL_MINT,
     LookupTables,
+    TokenAccounts,
     decode_solana_transaction,
 )
 from .prices import TokenPrices
@@ -70,7 +71,7 @@ class SolanaVerdict:
 
 class SolanaGuardEngine:
     def __init__(self, cosigner_private_key_bytes: bytes | None = None, lookup_tables: LookupTables | None = None,
-                 prices: TokenPrices | None = None):
+                 prices: TokenPrices | None = None, token_accounts: TokenAccounts | None = None):
         """Initializes the Guard engine with an Ed25519 co-signer keypair.
 
         `lookup_tables` resolves the address lookup tables v0 transactions use
@@ -83,6 +84,9 @@ class SolanaGuardEngine:
         only those two can be sized, unless the caller passes a SOL price."""
         self.lookup_tables = lookup_tables
         self.prices = prices
+        # Says which mint a token account holds, for instructions that spend one without
+        # naming its mint (see lookup.RpcTokenAccounts).
+        self.token_accounts = token_accounts
         if cosigner_private_key_bytes:
             self._key = ECC.import_key(cosigner_private_key_bytes)
         else:
@@ -242,6 +246,15 @@ class SolanaGuardEngine:
         total_estimated_usd = 0.0
         operations = []
         unit_price_micro_lamports = 0
+        # Token accounts this transaction itself sets up. What one of them holds can't be
+        # read off the chain beforehand: it may be opened for a different mint than it has now.
+        opened_here = {
+            accounts[0]
+            for inst in decoded.instructions
+            for det, accounts in [(inst.details.get("inner", {}), inst.accounts[4:]) if inst.operation == "VAULT_EXECUTE"
+                                  else (inst.details, inst.accounts)]
+            if str(det.get("type", "")).startswith("InitializeAccount") and accounts
+        }
         sol_lamports = 0.0
         unit_limit: int | None = None
 
@@ -374,6 +387,12 @@ class SolanaGuardEngine:
             elif kind in ("JUPITER_SWAP", "RAYDIUM_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED") and inst.input_amount is not None:
                 # A token amount is only a dollar figure if the Guard knows the token and its price.
                 mint = what.get("source_mint")
+                token_account = what.get("source_token_account")
+                if not mint and token_account and self.token_accounts and token_account not in opened_here:
+                    try:
+                        mint = self.token_accounts(token_account)
+                    except (OSError, ValueError, LookupError):      # can't be read: unknown, as before
+                        mint = None
                 if mint in (USDC_MINT, USDT_MINT):
                     total_estimated_usd += float(inst.input_amount) / 1e6
                 elif mint == WSOL_MINT:

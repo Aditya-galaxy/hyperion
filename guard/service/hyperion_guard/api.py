@@ -28,7 +28,7 @@ from .engine import ExecutorCall, Guard, GuardUnavailable, parse_order
 from .solana import SolanaAgentPolicy, SolanaGuardEngine, b58decode
 from .solana.control import action_message, policy_message
 from .solana.decoder import ALLOWLISTED_PROGRAMS
-from .solana.lookup import RpcLookupTables
+from .solana.lookup import RpcLookupTables, RpcTokenAccounts
 from .solana.prices import JupiterTokenPrices
 
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
@@ -46,8 +46,8 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
                   description="Pre-trade risk checks for autonomous trading agents, with multi-chain protection (Arc EVM + Solana).")
     signer = Account.from_key(guard.signer_key).address if guard else None
     if solana_guard is None:
-        # With an RPC node the Guard reads the address lookup tables v0 transactions use,
-        # so it can tell which token a swap spends. Without one, a swap whose token can't
+        # With an RPC node the Guard reads the address lookup tables v0 transactions use, and
+        # the token accounts they spend, so it can tell which token a swap spends. Without one, a swap whose token can't
         # be told from the transaction alone is refused.
         rpc_url = os.environ.get("HYPERION_SOLANA_RPC_URL")
         # With a price source it can size SOL and other tokens; without one, only USDC and USDT.
@@ -56,7 +56,8 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         prices = None
         if price_url:
             prices = JupiterTokenPrices() if price_url == "jupiter" else JupiterTokenPrices(price_url)
-        solana_guard = SolanaGuardEngine(lookup_tables=RpcLookupTables(rpc_url) if rpc_url else None, prices=prices)
+        solana_guard = SolanaGuardEngine(lookup_tables=RpcLookupTables(rpc_url) if rpc_url else None, prices=prices,
+                                         token_accounts=RpcTokenAccounts(rpc_url) if rpc_url else None)
     app.state.solana_guard = solana_guard
 
     @app.get("/v1/health")
