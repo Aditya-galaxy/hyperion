@@ -24,6 +24,8 @@ from Crypto.Signature import eddsa
 from .base58 import b58encode
 from .decoder import (
     ALLOWLISTED_PROGRAMS,
+    MAX_COMPUTE_UNITS,
+    WSOL_MINT,
     decode_solana_transaction,
 )
 
@@ -31,7 +33,7 @@ from .decoder import (
 # grant nothing, and calls into programs the owner listed that it can't decode.
 CO_SIGNABLE = frozenset({
     "JUPITER_SWAP", "RAYDIUM_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED", "SOL_TRANSFER", "VAULT_TRANSFER_SOL",
-    "TOKEN_HARMLESS", "EXTERNAL_CALL",
+    "TOKEN_HARMLESS", "EXTERNAL_CALL", "COMPUTE_BUDGET", "ATA_CREATE",
 })
 
 
@@ -220,6 +222,8 @@ class SolanaGuardEngine:
         # 4. Deep Inspection of Instructions
         total_estimated_usd = 0.0
         operations = []
+        unit_price_micro_lamports = 0
+        unit_limit: int | None = None
 
         for inst in decoded.instructions:
             operations.append(f"{inst.program_label}::{inst.operation}")
@@ -289,7 +293,7 @@ class SolanaGuardEngine:
             # program the owner listed that the Guard has no decoder for (EXTERNAL_CALL)
             # is the owner's decision and passes.
             kind = inst.details.get("inner_operation") if inst.operation == "VAULT_EXECUTE" else inst.operation
-            if kind not in CO_SIGNABLE:
+            if kind not in CO_SIGNABLE or (kind == "COMPUTE_BUDGET" and inst.operation == "VAULT_EXECUTE"):
                 what = inst.details.get("inner", inst.details) if inst.operation == "VAULT_EXECUTE" else inst.details
                 name = what.get("instruction_name") or what.get("type") or kind
                 return SolanaVerdict(
@@ -339,14 +343,26 @@ class SolanaGuardEngine:
             # Check C: Notional Size Estimation (a vault Execute counts as its inner call)
             if kind == "VAULT_TRANSFER_SOL":
                 kind = "SOL_TRANSFER"
-            if kind in ("JUPITER_SWAP", "RAYDIUM_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED") and inst.input_amount is not None:
-                # Assume 6 decimals (standard for USDC on Solana)
-                est_usd = float(inst.input_amount) / 1e6
-                total_estimated_usd += est_usd
-            elif kind == "SOL_TRANSFER" and inst.input_amount is not None:
+            what = inst.details.get("inner", {}) if inst.operation == "VAULT_EXECUTE" else inst.details
+            if kind == "COMPUTE_BUDGET":
+                unit_price_micro_lamports = max(unit_price_micro_lamports, what.get("micro_lamports_per_unit", 0))
+                if "units" in what:
+                    unit_limit = max(unit_limit or 0, what["units"])
+            elif kind in ("SOL_TRANSFER", "ATA_CREATE") and inst.input_amount is not None:
                 # Lamports (9 decimals) * sol_price_usd
-                est_usd = (float(inst.input_amount) / 1e9) * sol_price_usd
-                total_estimated_usd += est_usd
+                total_estimated_usd += (float(inst.input_amount) / 1e9) * sol_price_usd
+            elif kind == "JUPITER_SWAP" and what.get("source_mint") == WSOL_MINT:
+                # the swap spends wrapped SOL: lamports, not a 6-decimal token
+                total_estimated_usd += (float(inst.input_amount) / 1e9) * sol_price_usd
+            elif kind in ("JUPITER_SWAP", "RAYDIUM_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED") and inst.input_amount is not None:
+                # Assume 6 decimals (standard for USDC on Solana)
+                total_estimated_usd += float(inst.input_amount) / 1e6
+
+        # Check C.1: the priority fee is SOL the agent spends too. With no limit set,
+        # assume the most a transaction can use.
+        if unit_price_micro_lamports:
+            fee_lamports = unit_price_micro_lamports * min(unit_limit or MAX_COMPUTE_UNITS, MAX_COMPUTE_UNITS) / 1e6
+            total_estimated_usd += (fee_lamports / 1e9) * sol_price_usd
 
         # Check D: Order Notional Cap
         if total_estimated_usd > policy.max_order_notional_usd:

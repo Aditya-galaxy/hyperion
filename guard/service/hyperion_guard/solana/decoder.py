@@ -3,11 +3,12 @@ HYPERION SOLANA GUARD: TRANSACTION & INSTRUCTION DECODER
 =========================================================
 Decodes serialized Solana transactions (legacy and VersionedTransaction/v0),
 extracts instructions, and deep-inspects operations targeting major Solana venues:
-  - Jupiter Aggregator V6 (JUP6LkbZbjS1jKKwapdHNy74bHT3TL5K1449dk94Q1v5)
+  - Jupiter Aggregator V6 (JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4)
   - Phoenix LOB DEX (PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY)
   - Raydium AMM V4 (675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8)
   - SPL Token Program (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA)
   - System Program (11111111111111111111111111111111)
+  - Compute Budget and Associated Token Account, which most real swaps include
 
 Extracts input amounts, target venues, and slippage tolerances so the Guard firewall
 evaluates real on-chain intent rather than unverified agent declarations.
@@ -27,6 +28,20 @@ PHOENIX_PROGRAM_ID = "PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY"
 RAYDIUM_V4_PROGRAM_ID = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
 SPL_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 SYSTEM_PROGRAM_ID = "11111111111111111111111111111111"
+COMPUTE_BUDGET_PROGRAM_ID = "ComputeBudget111111111111111111111111111111"
+ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+
+WSOL_MINT = "So11111111111111111111111111111111111111112"
+USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+
+# Stands in for an account a v0 transaction loads from an address lookup table.
+# The table's contents aren't in the transaction, so the address isn't known
+# here; the placeholder keeps every other account at its real position.
+UNRESOLVED_ACCOUNT = "<address-lookup-table>"
+
+TOKEN_ACCOUNT_RENT_LAMPORTS = 2_039_280      # rent-exempt minimum for a 165-byte token account
+MAX_COMPUTE_UNITS = 1_400_000
 
 ALLOWLISTED_PROGRAMS = {
     JUPITER_V6_PROGRAM_ID: "Jupiter V6 Aggregator",
@@ -34,6 +49,8 @@ ALLOWLISTED_PROGRAMS = {
     RAYDIUM_V4_PROGRAM_ID: "Raydium AMM V4",
     SPL_TOKEN_PROGRAM_ID: "SPL Token",
     SYSTEM_PROGRAM_ID: "Solana System Program",
+    COMPUTE_BUDGET_PROGRAM_ID: "Compute Budget",
+    ASSOCIATED_TOKEN_PROGRAM_ID: "Associated Token Account",
 }
 
 @dataclass
@@ -72,64 +89,81 @@ def read_compact_u16(data: bytes, offset: int) -> tuple[int, int]:
     return val, idx
 
 # Published Jupiter V6 Anchor Instruction Discriminators (sha256("global:<name>")[:8])
-JUPITER_DISCRIMINATORS: dict[str, str] = {
-    "e517cb977ae3ad2a": "route",
-    "5703feb8e7573909": "sharedAccountsRoute",
-    "34650f14745e8de8": "routeWithTokenLedger",
-    "b4476e37d9cc1af6": "sharedAccountsRouteWithTokenLedger",
-    "7e2c8ea1d9a65bc6": "exactOutRoute",
-    "41d8fa8dac726b69": "sharedAccountsExactOutRoute",
+# Jupiter V6 swap instructions, from the program's on-chain Anchor IDL
+# (discriminator = sha256("global:<name>")[:8]). For each: its name, where the
+# fixed fields sit, whether the first amount is the exact output, and the
+# position of source_mint among the accounts (None where the instruction
+# doesn't carry it).
+#
+#   "tail":   route plan first, then  amount u64, quoted u64, slippage_bps u16, platform_fee_bps u8
+#   "ledger": route plan first, then  quoted_out u64, slippage_bps u16, platform_fee_bps u8.
+#             The input comes from a token ledger account, so it can't be sized.
+#   "head":   [id u8 for the shared forms] amount u64, quoted u64, slippage_bps u16,
+#             platform_fee_bps u16, positive_slippage_bps u16, then the route plan
+JUPITER_ROUTES: dict[str, tuple[str, str, bool, int | None]] = {
+    "e517cb977ae3ad2a": ("route", "tail", False, None),
+    "c1209b3341d69c81": ("sharedAccountsRoute", "tail", False, 7),
+    "d033ef977b2bed5c": ("exactOutRoute", "tail", True, 5),
+    "b0d169a89a7d453e": ("sharedAccountsExactOutRoute", "tail", True, 7),
+    "96564774a75d0e68": ("routeWithTokenLedger", "ledger", False, None),
+    "e6798f50779f6aaa": ("sharedAccountsRouteWithTokenLedger", "ledger", False, 7),
+    "bb64facc31c4af14": ("routeV2", "head", False, 3),
+    "9d8ab85215f4f324": ("exactOutRouteV2", "head", True, 3),
+    "d19853937cfed8e9": ("sharedAccountsRouteV2", "head", False, 6),
+    "3560e5cad8bbfa18": ("sharedAccountsExactOutRouteV2", "head", True, 6),
 }
+JUPITER_DISCRIMINATORS: dict[str, str] = {disc: route[0] for disc, route in JUPITER_ROUTES.items()}
 
 
 def decode_jupiter_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
     """
-    Decodes Jupiter V6 Aggregator instructions.
+    Decodes Jupiter V6 swaps (see JUPITER_ROUTES for the layouts).
 
-    Jupiter V6 published IDL layout:
-      - 8 bytes: Anchor discriminator (e.g. e517cb977ae3ad2a for route, 5703feb8e7573909 for sharedAccountsRoute)
-      - Variable length: routePlan: Vec<RoutePlanStep> (precedes the fixed fields)
-      - Exactly 19 bytes at the END of the instruction:
-          - inAmount: u64 (8 bytes, little-endian)
-          - quotedOutAmount: u64 (8 bytes, little-endian)
-          - slippageBps: u16 (2 bytes, little-endian)
-          - platformFeeBps: u8 (1 byte)
+    Returns the most the swap can spend as the input amount: in_amount for an
+    exact-in route, and quoted_in_amount plus the slippage allowance for an
+    exact-out route. The token-ledger routes take their input from an account,
+    not the instruction, so they come back as JUPITER_LEDGER_SWAP with no
+    amount, which the Guard refuses.
     """
-    if len(data) < 27:
-        return "UNKNOWN_JUPITER", None, None, None, {"error": "instruction too short (< 27 bytes for Jupiter route)"}
-
     discriminator = data[:8].hex()
-    route_name = JUPITER_DISCRIMINATORS.get(discriminator)
-    if not route_name:
+    route = JUPITER_ROUTES.get(discriminator)
+    if route is None:
         return "UNKNOWN_JUPITER", None, None, None, {"discriminator": discriminator, "error": f"unrecognized Jupiter discriminator {discriminator}"}
+    route_name, layout, exact_out, mint_at = route
+    details: dict[str, Any] = {"instruction_name": route_name, "discriminator": discriminator}
+    if mint_at is not None and mint_at < len(accounts) and accounts[mint_at] != UNRESOLVED_ACCOUNT:
+        details["source_mint"] = accounts[mint_at]
 
     try:
-        val1, val2, slippage_bps, platform_fee_bps = struct.unpack_from("<QQHB", data, len(data) - 19)
+        if layout == "ledger":
+            if len(data) < 8 + 4 + 11:
+                raise struct.error("instruction too short")
+            quoted_out, slippage_bps, platform_fee_bps = struct.unpack_from("<QHB", data, len(data) - 11)
+            details.update({"quoted_out_raw": quoted_out, "slippage_bps": slippage_bps, "platform_fee_bps": platform_fee_bps})
+            return "JUPITER_LEDGER_SWAP", None, quoted_out, slippage_bps, details
+        if layout == "tail":
+            if len(data) < 8 + 4 + 19:
+                raise struct.error("instruction too short")
+            val1, val2, slippage_bps, platform_fee_bps = struct.unpack_from("<QQHB", data, len(data) - 19)
+            details["route_plan_bytes_len"] = len(data) - 27 - ("shared" in route_name)
+        else:
+            at = 8 + ("shared" in route_name)
+            val1, val2, slippage_bps, platform_fee_bps, positive_slippage_bps, steps = struct.unpack_from("<QQHHHI", data, at)
+            details.update({"positive_slippage_bps": positive_slippage_bps, "route_plan_steps": steps})
     except struct.error as exc:
-        return "UNKNOWN_JUPITER", None, None, None, {"discriminator": discriminator, "error": str(exc)}
+        return "UNKNOWN_JUPITER", None, None, None, {**details, "error": f"malformed {route_name}: {exc}"}
 
-    if "exactOut" in route_name or "ExactOut" in route_name:
-        # In exactOutRoute / sharedAccountsExactOutRoute:
-        # trailing 19 bytes: outAmount (u64), quotedInAmount (u64), slippageBps (u16), platformFeeBps (u8)
-        in_amount = val2
-        quoted_out = val1
+    if exact_out:
+        # amount is the exact output; the input is a quote the swap may exceed by the slippage
+        out_amount, quoted_in = val1, val2
+        in_amount = -(-quoted_in * (10_000 + slippage_bps) // 10_000)
+        details.update({"exact": "out", "out_amount_raw": out_amount, "quoted_in_raw": quoted_in, "in_amount_raw": in_amount})
     else:
-        # In route / sharedAccountsRoute / routeWithTokenLedger:
-        # trailing 19 bytes: inAmount (u64), quotedOutAmount (u64), slippageBps (u16), platformFeeBps (u8)
-        in_amount = val1
-        quoted_out = val2
+        in_amount, out_amount = val1, val2
+        details.update({"exact": "in", "in_amount_raw": in_amount, "quoted_out_raw": out_amount})
+    details.update({"slippage_bps": slippage_bps, "platform_fee_bps": platform_fee_bps})
+    return "JUPITER_SWAP", in_amount, out_amount, slippage_bps, details
 
-    details: dict[str, Any] = {
-        "instruction_name": route_name,
-        "discriminator": discriminator,
-        "in_amount_raw": in_amount,
-        "quoted_out_raw": quoted_out,
-        "slippage_bps": slippage_bps,
-        "platform_fee_bps": platform_fee_bps,
-        "route_plan_bytes_len": len(data) - 27,
-    }
-
-    return "JUPITER_SWAP", in_amount, quoted_out, slippage_bps, details
 
 PHOENIX_INSTRUCTIONS = {
     0: "Swap", 1: "SwapWithFreeFunds", 2: "PlaceLimitOrder", 3: "PlaceLimitOrderWithFreeFunds", 4: "ReduceOrder",
@@ -241,7 +275,7 @@ SPL_TOKEN_HARMLESS = {1, 16, 18, 17, 5}
 def decode_spl_token_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
     """Decodes SPL Token instructions. Transfers are sized; a few that move
     and grant nothing are TOKEN_HARMLESS; the rest (Approve, SetAuthority,
-    CloseAccount, Burn, ...) are TOKEN_PROGRAM_INSTRUCTION, which the Guard refuses."""
+    CloseAccount to someone else, Burn, ...) are TOKEN_PROGRAM_INSTRUCTION, which the Guard refuses."""
     if len(data) < 1:
         return "UNKNOWN_TOKEN", None, None, None, {}
 
@@ -255,6 +289,11 @@ def decode_spl_token_instruction(data: bytes, accounts: list[str]) -> tuple[str,
         return "TOKEN_TRANSFER_CHECKED", amount, None, None, {"type": "TransferChecked", "amount": amount, "decimals": decimals}
 
     name = SPL_TOKEN_INSTRUCTIONS.get(ins_type, f"instruction {ins_type}")
+    # CloseAccount [account, destination, authority]: the account's lamports (all of a
+    # wrapped-SOL account's balance) go to `destination`. Harmless only when that is the
+    # authority itself, which is how a swap unwraps SOL back to the wallet.
+    if ins_type == 9 and len(accounts) >= 3 and accounts[1] == accounts[2] != UNRESOLVED_ACCOUNT:
+        return "TOKEN_HARMLESS", None, None, None, {"type": "CloseAccount (to its own authority)", "type_id": ins_type}
     if ins_type in SPL_TOKEN_HARMLESS:
         return "TOKEN_HARMLESS", None, None, None, {"type": name, "type_id": ins_type}
     return "TOKEN_PROGRAM_INSTRUCTION", None, None, None, {"type": name, "type_id": ins_type}
@@ -280,6 +319,36 @@ def decode_system_instruction(data: bytes, accounts: list[str]) -> tuple[str, in
 
     return "SYSTEM_INSTRUCTION", None, None, None, {"type": SYSTEM_INSTRUCTIONS.get(ins_type, f"instruction {ins_type}")}
 
+def decode_compute_budget_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
+    """Compute Budget: 1 RequestHeapFrame u32, 2 SetComputeUnitLimit u32,
+    3 SetComputeUnitPrice u64 (micro-lamports per unit), 4
+    SetLoadedAccountsDataSizeLimit u32. The price times the limit is the
+    priority fee, which the Guard counts as SOL spent."""
+    try:
+        tag = data[0]
+        if tag == 2 and len(data) == 5:
+            return "COMPUTE_BUDGET", None, None, None, {"type": "SetComputeUnitLimit", "units": struct.unpack_from("<I", data, 1)[0]}
+        if tag == 3 and len(data) == 9:
+            return "COMPUTE_BUDGET", None, None, None, {"type": "SetComputeUnitPrice",
+                                                        "micro_lamports_per_unit": struct.unpack_from("<Q", data, 1)[0]}
+        if tag in (1, 4) and len(data) == 5:
+            return "COMPUTE_BUDGET", None, None, None, {"type": "RequestHeapFrame" if tag == 1 else "SetLoadedAccountsDataSizeLimit"}
+    except IndexError:
+        pass
+    return "UNKNOWN_COMPUTE_BUDGET", None, None, None, {"error": "unrecognized Compute Budget instruction"}
+
+
+def decode_associated_token_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
+    """Associated Token Account: Create (no data, or 0) and CreateIdempotent (1)
+    open a token account, paid for by the funder: the rent is returned as the
+    amount, in lamports. RecoverNested (2) moves tokens and is refused."""
+    tag = data[0] if data else 0
+    if len(data) <= 1 and tag in (0, 1):
+        return "ATA_CREATE", TOKEN_ACCOUNT_RENT_LAMPORTS, None, None, {"type": "CreateIdempotent" if tag else "Create",
+                                                                       "lamports": TOKEN_ACCOUNT_RENT_LAMPORTS}
+    return "ATA_OPERATION", None, None, None, {"type": "RecoverNested" if tag == 2 else f"instruction {tag}"}
+
+
 def program_label(prog_id: str) -> str:
     from .vault import VAULT_PROGRAM_IDS
     if prog_id in VAULT_PROGRAM_IDS:
@@ -301,6 +370,10 @@ def decode_instruction_for_program(prog_id: str, inst_data: bytes, inst_accounts
         return decode_spl_token_instruction(inst_data, inst_accounts)
     if prog_id == SYSTEM_PROGRAM_ID:
         return decode_system_instruction(inst_data, inst_accounts)
+    if prog_id == COMPUTE_BUDGET_PROGRAM_ID:
+        return decode_compute_budget_instruction(inst_data, inst_accounts)
+    if prog_id == ASSOCIATED_TOKEN_PROGRAM_ID:
+        return decode_associated_token_instruction(inst_data, inst_accounts)
     if prog_id in VAULT_PROGRAM_IDS:
         return decode_vault_instruction(inst_data, inst_accounts)
     return "EXTERNAL_CALL", None, None, None, {"data_len": len(inst_data)}
@@ -357,15 +430,15 @@ def decode_solana_transaction(raw_bytes: bytes) -> DecodedSolanaTransaction:
     for _ in range(num_instructions):
         prog_id_idx = message_bytes[msg_offset]
         msg_offset += 1
-        prog_id = account_keys[prog_id_idx] if prog_id_idx < len(account_keys) else "UNKNOWN"
+        prog_id = account_keys[prog_id_idx] if prog_id_idx < len(account_keys) else UNRESOLVED_ACCOUNT
 
         num_acc_idx, msg_offset = read_compact_u16(message_bytes, msg_offset)
         inst_accounts = []
         for _ in range(num_acc_idx):
             acc_idx = message_bytes[msg_offset]
             msg_offset += 1
-            if acc_idx < len(account_keys):
-                inst_accounts.append(account_keys[acc_idx])
+            # keep positions: an account from a lookup table is a placeholder, not a gap
+            inst_accounts.append(account_keys[acc_idx] if acc_idx < len(account_keys) else UNRESOLVED_ACCOUNT)
 
         data_len, msg_offset = read_compact_u16(message_bytes, msg_offset)
         inst_data = message_bytes[msg_offset:msg_offset+data_len]
