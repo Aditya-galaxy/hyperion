@@ -35,7 +35,8 @@ Hyperion Guard acts as an institutional pre-trade co-signing firewall:
 │ Autonomous AI Agent     │
 │ (Python / TypeScript)   │
 └────────────┬────────────┘
-             │ 1. Assembles Solana Transaction (Jupiter / Phoenix / Raydium)
+             │ 1. Builds a transaction that spends from its vault
+             │    (a payment, or a Jupiter / Phoenix order)
              ▼
 ┌────────────────────────────────────────────────────────┐
 │               HYPERION SOLANA GUARD                   │
@@ -51,11 +52,20 @@ Hyperion Guard acts as an institutional pre-trade co-signing firewall:
 └────────────┬───────────────────────────────────────────┘
              │ 2. Co-Signed Transaction (Agent Sig + Guard Sig)
              ▼
-┌─────────────────────────┐
-│ Solana Validator / Jito │
-│ (RPC / Shredstream)     │
-└─────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│          GUARDED VAULT (Solana program, devnet)        │
+│                                                        │
+│  Holds the agent's funds. Pays only if:                │
+│     ├─ the agent AND the Guard both signed             │
+│     ├─ the vault isn't killed                          │
+│     └─ the amount is under the on-chain cap, or the    │
+│        target program is on the vault's allow-list     │
+│  Guardian can kill. Only the owner can revive,         │
+│  change the policy, or withdraw.                       │
+└────────────────────────────────────────────────────────┘
 ```
+
+The Guard alone protects an agent that chooses to ask it. The vault is what makes asking mandatory: without the Guard's signature, the program refuses the transaction on-chain.
 
 ### Core Firewalls
 - **Deterministic Program Allowlisting:** Dissects compiled transaction account keys. Rejects any transaction interacting with unauthorized programs or drainers.
@@ -144,10 +154,10 @@ cd guard/service
 
 **Total Project Tests Passing:**
 - 15 Rust High-Performance Quant Engine Tests (`cargo test`)
-- 14 Solana vault tests: 5 unit, 9 integration against the compiled program in LiteSVM (`cd guard/contracts_solana && cargo build-sbf && cargo test`)
-- 26 EVM Guard & Calldata Decoder Tests (`forge test`)
-- 74 Python Guard, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`)
-- **Total: 120 Automated Tests (100% Pass Rate)**
+- 15 Solana vault tests: 5 unit, 10 integration against the compiled program in LiteSVM (`cd guard/contracts_solana && cargo build-sbf && cargo test`)
+- 27 EVM Guard & Calldata Decoder Tests (`forge test`)
+- 88 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
+- **Total: 145 automated tests, all passing**
 
 ### Jito MEV & Sandwich Attack Simulation Benchmarks
 
@@ -169,6 +179,8 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 
 ## 7. 2.5-Minute Video Pitch & Demo Script
 
+The demo below is the pitch: six scenes, each a real devnet transaction.
+
 ### Live on devnet: the six scenes to record
 
 `python guard/demo/solana_devnet.py` runs these against the deployed program and prints an explorer link for each. One recorded run (2026-10-06):
@@ -185,27 +197,51 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 
 Each run makes a fresh agent, guardian and Guard key and so a fresh vault; the links above are from one run.
 
-### Scene 1: The Problem (0:00 - 0:35)
-- **Visual:** High-speed terminal showing Solana AI trading agents firing automated trades. Screen cuts to an alert showing an agent losing funds to a 500 bps slippage sandwich attack on Jupiter.
-- **Voiceover:** "Autonomous AI agents are executing DeFi trades on Solana. They analyze orderbooks, spot arbitrage, and execute swaps in milliseconds. But autonomous trading without guardrails can be catastrophic. Hallucinations, bad quotes, and aggressive MEV searchers can drain an agent's treasury in a single block. Because Solana finalizes blocks in 400 milliseconds, reactive alerts only tell you what you’ve already lost."
+### The script (2:30, about 360 spoken words)
 
-### Scene 2: Introducing Hyperion Guard (0:35 - 1:15)
-- **Visual:** Architectural graphic showing an AI agent sending raw transactions to Hyperion Guard, which validates the instructions in microseconds and co-signs them.
-- **Voiceover:** "Meet Hyperion Guard: an institutional pre-trade risk firewall for autonomous Solana agents. Hyperion Guard inspects compiled wire transactions *before* they touch the network. It parses the actual Anchor byte stream of Jupiter V6 swaps, and Phoenix LOB orders, enforcing mathematical risk collars before signing."
+One terminal and one browser tab. No slides except the opening and closing cards. Everything on screen is the real demo running on devnet.
 
-### Scene 3: Live Demo — Safe Trade vs. MEV Exploit (1:15 - 1:55)
-- **Visual:** Split-screen terminal.
-  - Left: Agent submits a safe trade with 25 bps slippage. Guard approves in <1ms and attaches an Ed25519 co-signature.
-  - Right: Agent submits a trade with 200 bps slippage (sandwich target). Guard immediately flags `REJECTED_EXCESSIVE_SLIPPAGE`, refusing to co-sign.
-- **Voiceover:** "Watch it in action. On the left, our agent submits a standard USDC to SOL swap on Jupiter. Guard decodes the instruction data, verifies the slippage collar and size cap, attaches an authorized Ed25519 co-signature, and authorizes broadcast. On the right, the agent experiences slippage drift. Guard instantly detects excessive slippage, rejects the transaction, and prevents the sandwich attack."
+#### 0:00 – 0:20 · The problem
+- **On screen:** Title card: "An AI agent holds the keys. What stops it?"
+- **Voiceover:** "AI agents now trade and pay on Solana on their own. To do that, they hold a private key. One hallucinated number, one prompt injection, and the money is gone in a single slot, about four hundred milliseconds. An alert afterwards only tells you what you lost."
 
-### Scene 4: Emergency Circuit Breaker & Co-Signing (1:55 - 2:15)
-- **Visual:** Admin triggers `/v1/solana/kill`. Agent immediately attempts another trade; Guard blocks it with `REJECTED_KILL_SWITCH`.
-- **Voiceover:** "If an agent enters an infinite retry loop or exhibits anomalous behavior, the risk officer triggers the cryptographic kill switch. All subsequent transactions are denied co-signing immediately, freezing execution within the current slot."
+#### 0:20 – 0:40 · What Hyperion Guard is
+- **On screen:** The architecture diagram from section 3: agent, Guard, vault.
+- **Voiceover:** "Hyperion Guard has two halves. The agent's money sits in a vault, a Solana program. The vault only pays when a second signature is present: the Guard's. And the Guard only signs after it has decoded the transaction and checked it against the owner's policy. Let me show you, live on devnet."
 
-### Scene 5: Conclusion & Future Roadmap (2:15 - 2:30)
-- **Visual:** Links to GitHub repository, Colosseum submission portal, and documentation.
-- **Voiceover:** "Hyperion Guard is an open-source, fully tested pre-trade risk engine for Jupiter and Phoenix, with a Guarded Vault program live on devnet. Inspect our open-source implementation on GitHub. Built for the Colosseum Arena Hackathon."
+#### 0:40 – 0:55 · Scene 1 and 2: open a vault, make a normal payment
+- **On screen:** Run `python guard/demo/solana_devnet.py`. Let scenes 1 and 2 print. Click the scene 2 link; show both signatures in the explorer.
+- **Voiceover:** "The owner opens a vault for the agent and funds it. The agent pays a merchant three dollars. The policy allows five, so the Guard co-signs, and the vault pays. Two signatures: the agent's and the Guard's."
+
+#### 0:55 – 1:15 · Scene 3: the agent goes around the Guard
+- **On screen:** Scene 3 output. Click the link; show the failed transaction and `custom program error: 0x3`.
+- **Voiceover:** "Now the agent is compromised and sends the same payment without asking the Guard. The program itself refuses it, on-chain: missing Guard co-signature. The merchant's balance hasn't moved. This is the point of the vault. The agent can't opt out."
+
+#### 1:15 – 1:30 · Scene 4: over the limit
+- **On screen:** Scene 4 output: `REJECTED_ORDER_CAP`, "Order notional $6.00 exceeds cap of $5.00".
+- **Voiceover:** "Next, a six-dollar order against a five-dollar cap. The Guard decodes the amount, refuses, and returns no signature. There's no transaction to send."
+
+#### 1:30 – 1:55 · Scene 5 and 6: the kill switch, and the owner's exit
+- **On screen:** Scene 5 output: the kill link, then the failed transfer with `0x4`. Then scene 6.
+- **Voiceover:** "Something looks wrong, so a guardian, a monitoring bot, kills the vault with one transaction. Here's a transfer the Guard had already approved a moment earlier. It fails too: vault killed. The guardian can stop the agent, but it can't take the money. Only the owner can, and here the owner withdraws everything from the killed vault."
+
+#### 1:55 – 2:15 · What's real, and what isn't yet
+- **On screen:** The repository: `guard/contracts_solana/`, then the green CI run.
+- **Voiceover:** "What you saw is a native Solana program, deployed on devnet, and a Guard that decodes Jupiter, Phoenix and token instructions. The tests run the compiled program, and Python and Rust agree byte for byte. It's a prototype: devnet only, not audited, and token amounts are checked by the Guard, not yet capped on-chain."
+
+#### 2:15 – 2:30 · Close
+- **On screen:** Closing card: repository URL and the program id.
+- **Voiceover:** "Agents will hold money. Hyperion Guard is how an owner sets the rules and knows they hold. It's open source. The program id and every transaction from this demo are in the repository."
+
+### Recording checklist
+
+1. Check the wallet has at least 0.2 SOL on devnet: `solana balance --url devnet`.
+2. Do one practice run first. Each run opens a new vault, so the links change every time; record the explorer tabs from the same run you narrate.
+3. Terminal at 16–18 pt, dark theme, window about 110 columns wide so the links don't wrap.
+4. The run takes about 30 seconds. Record it once at real speed, then cut to the explorer between scenes in the edit instead of waiting on screen.
+5. In the explorer, keep `?cluster=devnet` visible in the address bar, so nobody mistakes this for mainnet.
+6. Failed transactions show `custom program error: 0x3` and `0x4`. Zoom in on that line.
+7. Record the voiceover separately and lay it over the picture. It's easier to hit 2:30.
 
 ---
 
