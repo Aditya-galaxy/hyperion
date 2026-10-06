@@ -234,15 +234,19 @@ def test_decode_jupiter_exact_out_route():
 
 
 def test_decode_phoenix_limit_order():
-    data = bytes([1, 0]) + struct.pack("<QQ", 1000, 500)
+    # PlaceLimitOrder (2), OrderPacket::Limit (1), bid (0), price 1000 ticks, 500 base lots
+    data = bytes([2, 1, 0]) + struct.pack("<QQ", 1000, 500) + bytes(40)
     tx_bytes = build_mock_solana_tx(PHOENIX_PROGRAM_ID, data)
     decoded = decode_solana_transaction(tx_bytes)
 
     assert len(decoded.instructions) == 1
     inst = decoded.instructions[0]
     assert inst.program_id == PHOENIX_PROGRAM_ID
-    assert inst.operation == "PHOENIX_LIMIT_ORDER"
-    assert inst.details["side"] == "BID"
+    assert inst.operation == "PHOENIX_ORDER"
+    assert inst.input_amount is None                     # lots aren't dollars
+    assert (inst.details["instruction_name"], inst.details["order_type"], inst.details["side"]) == (
+        "PlaceLimitOrder", "Limit", "BID")
+    assert (inst.details["price_in_ticks"], inst.details["num_base_lots"]) == (1000, 500)
 
 
 # ── 3. Solana Guard Policy & Firewall Enforcement Tests ───────────────────────

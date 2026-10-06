@@ -14,7 +14,7 @@
 
 Autonomous trading agents on Solana are rapidly executing across Jupiter, Phoenix LOB, and Raydium. However, autonomous agents suffer from failure modes: model hallucinations, prompt injection attacks, stale pricing, and toxic sandwich MEV exploitation by searchers. Because Solana processes blocks in ~400ms, **post-trade monitoring is a post-mortem**. 
 
-**Hyperion Guard** is an institutional pre-trade risk gateway and cryptographic co-signer designed for the Solana agentic economy (prototype). Before any raw Solana transaction payload reaches validators, Hyperion Guard intercepts the wire bytes, decodes the compiled instructions (Jupiter V6, Phoenix, Raydium AMM V4 swaps, SPL Token, System and the Guarded Vault), checks strict risk firewalls, and co-signs compliant transactions with an authorized Ed25519 key. If an agent hallucinates an excessive swap size, accepts toxic slippage, or is targeted by an unapproved program, the Guard rejects the transaction before a single lamport is risked.
+**Hyperion Guard** is an institutional pre-trade risk gateway and cryptographic co-signer designed for the Solana agentic economy (prototype). Before any raw Solana transaction payload reaches validators, Hyperion Guard intercepts the wire bytes, decodes the compiled instructions (Jupiter V6 and Raydium AMM V4 swaps, SPL Token and SOL transfers, and the Guarded Vault), checks strict risk firewalls, and co-signs compliant transactions with an authorized Ed25519 key. If an agent hallucinates an excessive swap size, accepts toxic slippage, or is targeted by an unapproved program, the Guard rejects the transaction before a single lamport is risked.
 
 ---
 
@@ -36,13 +36,13 @@ Hyperion Guard acts as an institutional pre-trade co-signing firewall:
 │ (Python / TypeScript)   │
 └────────────┬────────────┘
              │ 1. Builds a transaction that spends from its vault
-             │    (a payment, or a Jupiter / Phoenix order)
+             │    (a payment, or a Jupiter / Raydium swap)
              ▼
 ┌────────────────────────────────────────────────────────┐
 │               HYPERION SOLANA GUARD                   │
 │                                                        │
 │  [1. Wire Decoder]     Legacy & V0 transaction parser  │
-│  [2. Instruction DPI]  Extracts Jupiter / Phoenix data │
+│  [2. Instruction DPI]  Extracts Jupiter / Raydium data │
 │  [3. Policy Firewall]                                  │
 │     ├─ Max Notional Cap  ($ USD limit per order)       │
 │     ├─ Slippage Collar   (≤ max allowed bps)           │
@@ -69,7 +69,8 @@ The Guard alone protects an agent that chooses to ask it. The vault is what make
 
 ### Core Firewalls
 - **Deterministic Program Allowlisting:** Dissects compiled transaction account keys. Rejects any transaction interacting with unauthorized programs or drainers.
-- **Deep DEX Instruction Decoding:** Native unpacking of Anchor 8-byte discriminators and variable-length route plans with 19-byte parameter suffixes for Jupiter V6 (`sharedAccountsRoute`, `route`), Phoenix LOB (`newOrder`, `swap`), and Raydium AMM V4 swaps (`swapBaseIn`, `swapBaseOut` and their V2 forms). Raydium's instruction has no slippage figure, so the Guard requires a real limit instead (a non-zero minimum out, or a maximum in) and refuses Raydium's non-swap instructions.
+- **Deep DEX Instruction Decoding:** Native unpacking of Anchor 8-byte discriminators and variable-length route plans with 19-byte parameter suffixes for Jupiter V6 (`sharedAccountsRoute`, `route`) and Raydium AMM V4 swaps (`swapBaseIn`, `swapBaseOut` and their V2 forms). Raydium's instruction has no slippage figure, so the Guard requires a real limit instead (a non-zero minimum out, or a maximum in) and refuses Raydium's non-swap instructions.
+- **Fail-Closed on Everything Else:** An allow-listed program is inspected, not waved through. The Guard co-signs only instructions it can size (swaps, token and SOL transfers) or knows move nothing (opening a token account, `SyncNative`, `Revoke`). It refuses token `Approve`, `SetAuthority`, `CloseAccount` and `Burn`; System `Assign` and durable-nonce instructions (a transaction on a durable nonce never expires, so a co-signature on one would outlive a kill); and every Phoenix instruction. Phoenix orders are decoded (type, side, ticks, lots), but lots only become dollars with a market's parameters, which the Guard doesn't have yet. One exception: a program the owner adds that the Guard has no decoder for is passed on the owner's word.
 - **Anti-MEV Slippage Collar:** Directly inspects `slippage_bps` encoded in DEX swaps, bounding maximum acceptable slippage to eliminate sandwich vulnerability.
 - **Notional Size Caps:** Binds maximum USD exposure per order and throttles runaway trading loops.
 - **Cryptographic Kill Switch:** Owner/Guardian Ed25519-signed endpoint immediately revokes an agent's trading authority without requiring on-chain transaction delays. Guardians may trip the kill switch, but only the registered owner can revive trading.
@@ -91,7 +92,7 @@ Hyperion Guard is built as a zero-overhead, sub-millisecond service within the H
 
 ### Supported Solana Protocols
 - **Jupiter V6 Aggregator:** `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4`
-- **Phoenix Limit Order Book:** `PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY`
+- **Phoenix Limit Order Book (decoded, not co-signed yet):** `PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY`
 - **Raydium AMM V4 (swaps):** `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8`
 - **SPL Token Program:** `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`
 - **Solana System Program:** `11111111111111111111111111111111`
@@ -142,7 +143,8 @@ cd guard/service
 - `test_decode_real_mainnet_jupiter_swap`: Tests against real mainnet Jupiter route instruction (`7zoC74aDKgHF...`).
 - `test_decode_jupiter_v6_swap`: Correct extraction of in-amount, min-out, and slippage BPS.
 - `test_decode_jupiter_exact_out_route`: Verified parameter unpacking on exactOutRoute Jupiter swaps.
-- `test_decode_phoenix_limit_order`: Accurate price/quantity unpacking from Phoenix byte stream.
+- `test_decode_phoenix_limit_order`: Reads a Phoenix order packet (type, side, ticks, lots) as phoenix-v1 lays it out.
+- `test_solana_fail_closed.py`: Token approvals, durable nonces, Phoenix orders and other unsized instructions are refused, directly and inside a vault call.
 - `test_guard_rejects_missing_guard_signer`: Rejects transactions that do not configure Guard as a required signer.
 - `test_guard_rejects_malformed_or_unparsed_instruction`: Fail-closed firewall guarantees on unparsed instructions.
 - `test_guard_approves_safe_jupiter_swap`: Co-signs safe trades with verified Ed25519 signatures.
@@ -156,8 +158,8 @@ cd guard/service
 - 15 Rust High-Performance Quant Engine Tests (`cargo test`)
 - 15 Solana vault tests: 5 unit, 10 integration against the compiled program in LiteSVM (`cd guard/contracts_solana && cargo build-sbf && cargo test`)
 - 27 EVM Guard & Calldata Decoder Tests (`forge test`)
-- 102 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
-- **Total: 159 automated tests, all passing**
+- 157 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
+- **Total: 214 automated tests, all passing**
 
 ### Jito MEV & Sandwich Attack Simulation Benchmarks
 
@@ -227,7 +229,7 @@ One terminal and one browser tab. No slides except the opening and closing cards
 
 #### 1:55 – 2:15 · What's real, and what isn't yet
 - **On screen:** The repository: `guard/contracts_solana/`, then the green CI run.
-- **Voiceover:** "What you saw is a native Solana program, deployed on devnet, and a Guard that decodes Jupiter, Phoenix and token instructions. The tests run the compiled program, and Python and Rust agree byte for byte. It's a prototype: devnet only, not audited, and token amounts are checked by the Guard, not yet capped on-chain."
+- **Voiceover:** "What you saw is a native Solana program, deployed on devnet, and a Guard that decodes Jupiter and Raydium swaps and token transfers, and refuses what it can't size. The tests run the compiled program, and Python and Rust agree byte for byte. It's a prototype: devnet only, not audited, and token amounts are checked by the Guard, not yet capped on-chain."
 
 #### 2:15 – 2:30 · Close
 - **On screen:** Closing card: repository URL and the program id.

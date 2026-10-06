@@ -131,26 +131,66 @@ def decode_jupiter_instruction(data: bytes, accounts: list[str]) -> tuple[str, i
 
     return "JUPITER_SWAP", in_amount, quoted_out, slippage_bps, details
 
+PHOENIX_INSTRUCTIONS = {
+    0: "Swap", 1: "SwapWithFreeFunds", 2: "PlaceLimitOrder", 3: "PlaceLimitOrderWithFreeFunds", 4: "ReduceOrder",
+    5: "ReduceOrderWithFreeFunds", 6: "CancelAllOrders", 7: "CancelAllOrdersWithFreeFunds", 8: "CancelUpTo",
+    9: "CancelUpToWithFreeFunds", 10: "CancelMultipleOrdersById", 11: "CancelMultipleOrdersByIdWithFreeFunds",
+    12: "WithdrawFunds", 13: "DepositFunds", 14: "RequestSeat", 15: "Log", 16: "PlaceMultiplePostOnlyOrders",
+    17: "PlaceMultiplePostOnlyOrdersWithFreeFunds",
+}
+PHOENIX_PACKETS = {0: "PostOnly", 1: "Limit", 2: "ImmediateOrCancel"}
+
+
 def decode_phoenix_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
-    """Decodes Phoenix Limit Order Book instructions."""
-    if len(data) < 1:
-        return "UNKNOWN_PHOENIX", None, None, None, {}
+    """
+    Decodes Phoenix orders (phoenix-v1: program/instruction.rs and
+    state/order_schema/order_packet.rs).
 
+      - 1 byte: instruction. 0 Swap, 1 SwapWithFreeFunds, 2 PlaceLimitOrder,
+        3 PlaceLimitOrderWithFreeFunds carry a Borsh OrderPacket
+      - OrderPacket: 1 byte variant (0 PostOnly, 1 Limit, 2 ImmediateOrCancel),
+        1 byte side (0 bid, 1 ask), then
+          PostOnly, Limit:    price_in_ticks u64, num_base_lots u64, ...
+          ImmediateOrCancel:  price_in_ticks Option<u64>, num_base_lots u64,
+                              num_quote_lots u64, min_base_lots_to_fill u64,
+                              min_quote_lots_to_fill u64, ...
+
+    Phoenix sizes orders in lots and ticks, and what a lot is worth is set in
+    each market's header, which isn't in the transaction. So the Guard can
+    read an order but can't put a dollar figure on it, and no amount is
+    returned: these are PHOENIX_ORDER, which the Guard refuses until it has
+    market parameters. Everything else is named and refused too.
+    """
+    if not data:
+        return "UNKNOWN_PHOENIX", None, None, None, {"error": "empty Phoenix instruction"}
     tag = data[0]
-    details: dict[str, Any] = {"phoenix_tag": tag}
+    name = PHOENIX_INSTRUCTIONS.get(tag)
+    if name is None:
+        return "UNKNOWN_PHOENIX", None, None, None, {"phoenix_tag": tag, "error": f"unrecognized Phoenix instruction {tag}"}
+    details: dict[str, Any] = {"instruction_name": name, "phoenix_tag": tag}
+    if tag > 3:
+        return "PHOENIX_OPERATION", None, None, None, details
+    try:
+        variant, side = data[1], data[2]
+        if variant not in PHOENIX_PACKETS or side > 1:
+            raise ValueError(f"order packet variant {variant}, side {side}")
+        details.update({"order_type": PHOENIX_PACKETS[variant], "side": "BID" if side == 0 else "ASK"})
+        at = 3
+        if variant == 2:
+            has_price = data[at]
+            if has_price > 1:
+                raise ValueError(f"Option tag {has_price}")
+            at += 1
+            details["price_in_ticks"] = struct.unpack_from("<Q", data, at)[0] if has_price else None
+            at += 8 * has_price
+            (details["num_base_lots"], details["num_quote_lots"], details["min_base_lots_to_fill"],
+             details["min_quote_lots_to_fill"]) = struct.unpack_from("<QQQQ", data, at)
+        else:
+            details["price_in_ticks"], details["num_base_lots"] = struct.unpack_from("<QQ", data, at)
+    except (IndexError, struct.error, ValueError) as exc:
+        return "UNKNOWN_PHOENIX", None, None, None, {**details, "error": f"malformed order packet: {exc}"}
+    return "PHOENIX_ORDER", None, None, None, details
 
-    # Tag 0 = Swap / Market Order, Tag 1 = NewOrder / Limit Order
-    if tag == 0 and len(data) >= 9:
-        amount = struct.unpack_from("<Q", data, 1)[0]
-        return "PHOENIX_SWAP", amount, None, None, details
-    elif tag == 1 and len(data) >= 18:
-        side = data[1] # 0 = Bid, 1 = Ask
-        price_ticks = struct.unpack_from("<Q", data, 2)[0]
-        lots = struct.unpack_from("<Q", data, 10)[0]
-        details.update({"side": "BID" if side == 0 else "ASK", "price_ticks": price_ticks, "lots": lots})
-        return "PHOENIX_LIMIT_ORDER", lots, None, None, details
-
-    return "PHOENIX_OPERATION", None, None, None, details
 
 RAYDIUM_SWAPS = {9: "swapBaseIn", 11: "swapBaseOut", 16: "swapBaseInV2", 17: "swapBaseOutV2"}
 
@@ -187,8 +227,21 @@ def decode_raydium_instruction(data: bytes, accounts: list[str]) -> tuple[str, i
     return "RAYDIUM_SWAP", in_amount, out_amount, None, details
 
 
+SPL_TOKEN_INSTRUCTIONS = {
+    0: "InitializeMint", 1: "InitializeAccount", 2: "InitializeMultisig", 3: "Transfer", 4: "Approve", 5: "Revoke",
+    6: "SetAuthority", 7: "MintTo", 8: "Burn", 9: "CloseAccount", 10: "FreezeAccount", 11: "ThawAccount",
+    12: "TransferChecked", 13: "ApproveChecked", 14: "MintToChecked", 15: "BurnChecked", 16: "InitializeAccount2",
+    17: "SyncNative", 18: "InitializeAccount3",
+}
+# Move nothing and grant nothing: opening a token account, syncing a wrapped-SOL
+# balance, taking a delegate's allowance away.
+SPL_TOKEN_HARMLESS = {1, 16, 18, 17, 5}
+
+
 def decode_spl_token_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
-    """Decodes SPL Token Program transfers."""
+    """Decodes SPL Token instructions. Transfers are sized; a few that move
+    and grant nothing are TOKEN_HARMLESS; the rest (Approve, SetAuthority,
+    CloseAccount, Burn, ...) are TOKEN_PROGRAM_INSTRUCTION, which the Guard refuses."""
     if len(data) < 1:
         return "UNKNOWN_TOKEN", None, None, None, {}
 
@@ -201,17 +254,31 @@ def decode_spl_token_instruction(data: bytes, accounts: list[str]) -> tuple[str,
         decimals = data[9]
         return "TOKEN_TRANSFER_CHECKED", amount, None, None, {"type": "TransferChecked", "amount": amount, "decimals": decimals}
 
-    return "TOKEN_PROGRAM_INSTRUCTION", None, None, None, {"type_id": ins_type}
+    name = SPL_TOKEN_INSTRUCTIONS.get(ins_type, f"instruction {ins_type}")
+    if ins_type in SPL_TOKEN_HARMLESS:
+        return "TOKEN_HARMLESS", None, None, None, {"type": name, "type_id": ins_type}
+    return "TOKEN_PROGRAM_INSTRUCTION", None, None, None, {"type": name, "type_id": ins_type}
+
+
+SYSTEM_INSTRUCTIONS = {
+    0: "CreateAccount", 1: "Assign", 2: "Transfer", 3: "CreateAccountWithSeed", 4: "AdvanceNonceAccount",
+    5: "WithdrawNonceAccount", 6: "InitializeNonceAccount", 7: "AuthorizeNonceAccount", 8: "Allocate",
+    9: "AllocateWithSeed", 10: "AssignWithSeed", 11: "TransferWithSeed", 12: "UpgradeNonceAccount",
+}
+
 
 def decode_system_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
-    """Decodes Solana System Program instructions (SOL transfers)."""
-    if len(data) >= 12:
-        ins_type = struct.unpack_from("<I", data, 0)[0]
-        if ins_type == 2: # Transfer
-            lamports = struct.unpack_from("<Q", data, 4)[0]
-            return "SOL_TRANSFER", lamports, None, None, {"lamports": lamports}
+    """Decodes System Program instructions. Transfer and CreateAccount both
+    move lamports out of the payer and are sized as SOL. The rest is
+    SYSTEM_INSTRUCTION, which the Guard refuses: among them
+    AdvanceNonceAccount, because a transaction on a durable nonce never
+    expires, so a co-signature on one would outlive a kill."""
+    ins_type = struct.unpack_from("<I", data, 0)[0] if len(data) >= 4 else None
+    if ins_type in (0, 2) and len(data) >= 12:
+        lamports = struct.unpack_from("<Q", data, 4)[0]
+        return "SOL_TRANSFER", lamports, None, None, {"type": SYSTEM_INSTRUCTIONS[ins_type], "lamports": lamports}
 
-    return "SYSTEM_INSTRUCTION", None, None, None, {}
+    return "SYSTEM_INSTRUCTION", None, None, None, {"type": SYSTEM_INSTRUCTIONS.get(ins_type, f"instruction {ins_type}")}
 
 def program_label(prog_id: str) -> str:
     from .vault import VAULT_PROGRAM_IDS
