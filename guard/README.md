@@ -53,8 +53,13 @@ instead of an EVM wallet:
 - **Live demo:** `python guard/demo/solana_devnet.py` runs six scenes on
   devnet and prints an explorer link for each.
 
-The Solana Guard keeps policies, nonces and the day's spend in memory, so a
-restart forgets them. `/v1/solana/check` doesn't authenticate the caller.
+A policy names the agent's own key, and `/v1/solana/check` judges only
+transactions that key has signed, so nobody else can use up an agent's rate
+limit or daily cap. Asking twice about the same transaction returns the same
+signature and counts once.
+
+The Solana Guard keeps policies, nonces, the day's spend and its co-signing
+key in memory, so a restart forgets them.
 
 ## Try it in one command
 

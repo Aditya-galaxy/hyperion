@@ -14,6 +14,7 @@ allowing multi-sig or co-signed execution on Solana.
 
 from __future__ import annotations
 
+import hashlib
 import struct
 import time
 from dataclasses import dataclass, field
@@ -21,7 +22,7 @@ from dataclasses import dataclass, field
 from Crypto.PublicKey import ECC
 from Crypto.Signature import eddsa
 
-from .base58 import b58encode
+from .base58 import b58decode, b58encode
 from .decoder import (
     ALLOWLISTED_PROGRAMS,
     MAX_COMPUTE_UNITS,
@@ -47,6 +48,10 @@ class SolanaAgentPolicy:
     agent_id: str
     owner_solana_pubkey: str
     guardian_solana_pubkey: str = ""
+    # The agent's own key. When set, the Guard judges only transactions this key has
+    # signed. The API requires it; leaving it empty skips the check (for callers that
+    # authenticate the agent some other way).
+    agent_solana_pubkey: str = ""
     max_order_notional_usd: float = 5_000.0
     daily_notional_cap_usd: float = 50_000.0
     max_slippage_bps: int = 150 # 1.5% max allowable slippage
@@ -68,6 +73,20 @@ class SolanaVerdict:
     cosigner_signature_b58: str | None
     decoded_operations: list[str]
     violation_details: str | None = None
+
+def _signed_by(decoded, signer: str) -> bool:
+    """Whether `signer` is a required signer of the transaction and its slot
+    holds a valid Ed25519 signature over the message."""
+    try:
+        slot = decoded.account_keys.index(signer)
+        if slot >= decoded.num_required_signatures or slot >= len(decoded.signatures):
+            return False
+        key = eddsa.import_public_key(b58decode(signer))
+        eddsa.new(key, "rfc8032").verify(decoded.message_bytes, b58decode(decoded.signatures[slot]))
+        return True
+    except (ValueError, TypeError):
+        return False
+
 
 class SolanaGuardEngine:
     def __init__(self, cosigner_private_key_bytes: bytes | None = None, lookup_tables: LookupTables | None = None,
@@ -105,6 +124,12 @@ class SolanaGuardEngine:
         # one sequence), so a signed message can never be replayed. In memory, like the rest
         # of this engine's state: a restart forgets it, as it forgets the policies.
         self.last_nonce: dict[str, int] = {}
+        # Messages already approved, per agent: sha256(message) -> the signature given.
+        # Asking again about the same transaction gets the same answer and isn't counted
+        # again. A broadcast transaction is public, so without this anyone could resubmit
+        # it to use up the agent's rate limit and daily cap. Kept for the life of the
+        # process: it only grows with transactions the agent itself signed.
+        self.approved_messages: dict[str, dict[bytes, str]] = {}
 
     @property
     def pubkey_b58(self) -> str:
@@ -200,6 +225,38 @@ class SolanaGuardEngine:
                 cosigner_signature_b58=None,
                 decoded_operations=[],
                 violation_details=f"Failed to decode Solana wire transaction: {e!s}"
+            )
+
+        # 2.1 The agent must have signed it. Checked before anything is counted, so a
+        # stranger's transaction can't touch the agent's throttle or caps.
+        if policy.agent_solana_pubkey and not _signed_by(decoded, policy.agent_solana_pubkey):
+            return SolanaVerdict(
+                approved=False,
+                status="REJECTED_NOT_SIGNED_BY_AGENT",
+                agent_id=agent_id,
+                recent_blockhash=decoded.recent_blockhash,
+                evaluated_at_ns=now_ns,
+                cosigner_pubkey=self.cosigner_pubkey_b58,
+                cosigner_signature_b58=None,
+                decoded_operations=[],
+                violation_details=(f"The transaction doesn't carry a valid signature from this agent's key "
+                                   f"({policy.agent_solana_pubkey})"),
+            )
+
+        # 2.2 Already approved: the same answer, not counted a second time.
+        message_hash = hashlib.sha256(decoded.message_bytes).digest()
+        earlier = self.approved_messages.get(agent_id, {}).get(message_hash)
+        if earlier is not None:
+            return SolanaVerdict(
+                approved=True,
+                status="APPROVED",
+                agent_id=agent_id,
+                recent_blockhash=decoded.recent_blockhash,
+                evaluated_at_ns=now_ns,
+                cosigner_pubkey=self.cosigner_pubkey_b58,
+                cosigner_signature_b58=earlier,
+                decoded_operations=[f"{inst.program_label}::{inst.operation}" for inst in decoded.instructions],
+                violation_details=None,
             )
 
         # 3. Guard Signer Requirement (Forces Guard co-signature to matter!)
@@ -494,6 +551,7 @@ class SolanaGuardEngine:
 
         rolling_24h_spends.append((now_sec, total_estimated_usd))
         self.daily_spend_tracker[agent_id] = rolling_24h_spends
+        self.approved_messages.setdefault(agent_id, {})[message_hash] = sig_b58
 
         return SolanaVerdict(
             approved=True,
