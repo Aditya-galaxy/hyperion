@@ -29,6 +29,26 @@ fast, tested, but run only on simulated data and not connected to any exchange.
 
 ---
 
+## 🛡️ Hyperion Guard: a firewall for trading agents
+
+An AI agent that trades holds a key. Hyperion Guard stands between the agent's
+decision and the chain: it decodes the transaction, checks it against limits
+the agent's owner set, and only then co-signs.
+
+- **On Solana**, the agent's funds sit in a Guarded Vault program that pays
+  only with the Guard's signature. The Guard decodes Jupiter and Raydium swaps
+  and token and SOL transfers, sizes them in dollars at a live price, and
+  refuses what it can't size. The vault is live on **devnet**:
+  [`9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq`](https://explorer.solana.com/address/9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq?cluster=devnet).
+  See [guard/contracts_solana](guard/contracts_solana/README.md), and run the
+  six-scene demo with `python guard/demo/solana_devnet.py`.
+- **On Arc**, limits and the kill switch live in a contract, and a
+  `GuardedExecutor` wallet only executes a call that carries a live approval.
+  See [guard/README.md](guard/README.md); `bash guard/demo/local.sh` runs it
+  on a local chain.
+
+It's a prototype: devnet and local chains only, not audited.
+
 ## 📰 Hyperion Events: exchange notices vs. real prices
 
 **Live site: [Hyperion Events](https://storage.googleapis.com/hyperion-events-site-kronagent/index.html)**:
@@ -152,7 +172,7 @@ cargo run --release --bin benchmark
 cargo run --release --bin hyperion-quant
 ```
 
-### 6. Run the Rust test suite (14 tests)
+### 6. Run the Rust test suite (15 tests)
 ```bash
 cargo test
 ```

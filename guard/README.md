@@ -32,6 +32,30 @@ The checks are modelled on Hyperion's Rust pre-trade risk controller
 then size, collar and throttle, with a daily notional cap in place of its
 position limit, since the Guard sees orders, not fills.
 
+## Also on Solana
+
+The same idea runs on Solana, where the enforcement is a native program
+instead of an EVM wallet:
+
+- **The Guarded Vault** ([contracts_solana](contracts_solana/README.md)) holds
+  the agent's funds and pays only when the agent and the Guard both signed.
+  A guardian can kill it; only the owner can revive it or withdraw. It is
+  deployed on devnet: [`9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq`](https://explorer.solana.com/address/9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq?cluster=devnet).
+- **The Solana Guard** ([service/hyperion_guard/solana](service/hyperion_guard/solana/))
+  decodes the agent's transaction (Jupiter and Raydium swaps, token and SOL
+  transfers, vault instructions), sizes it in dollars and co-signs with
+  Ed25519, or refuses. It co-signs only what it can size:
+  - USDC and USDT at $1; SOL and other tokens at a live price
+    (`HYPERION_SOLANA_PRICES=jupiter`);
+  - with `HYPERION_SOLANA_RPC_URL` it reads the address lookup tables and
+    token accounts a transaction uses, to know which token is being spent;
+  - anything it can't identify or price is refused.
+- **Live demo:** `python guard/demo/solana_devnet.py` runs six scenes on
+  devnet and prints an explorer link for each.
+
+The Solana Guard keeps policies, nonces and the day's spend in memory, so a
+restart forgets them. `/v1/solana/check` doesn't authenticate the caller.
+
 ## Try it in one command
 
 With [Foundry](https://getfoundry.sh) and Python 3.11+:
@@ -175,10 +199,12 @@ SELLER_ADDRESS=0x… npm start
 
 ## What it doesn't do (yet)
 
-- **The notional is declared, not decoded.** `GuardedExecutor` can't read a
-  trade size out of arbitrary calldata. The agent declares it and the Guard
-  checks the declared figure. The owner's target allow-list bounds what a lie
-  could reach. Venue-specific decoders are the next step.
+- **The notional is declared, and decoded only for calls the executor knows.**
+  `GuardedExecutor` reads the size out of a few known calls (the demo venue's
+  `placeOrder`, Uniswap V3 `exactInputSingle` and USDC transfers) and reverts
+  if the agent declared less. For any other calldata the Guard checks the
+  declared figure, and the owner's target allow-list bounds what a lie could
+  reach.
 - **One signer.** The Guard's signing key is a hot key on the service. The
   contract lets the admin rotate it, and rotating kills every outstanding
   verdict. A threshold of signers is future work.
@@ -188,8 +214,9 @@ SELLER_ADDRESS=0x… npm start
 - **Reference prices.** Pyth Hermes (it needs an API key since 2026-08-26) or
   fixed prices for demos. On-chain oracles on Arc (Chainlink, Pyth, RedStone)
   are the next source to add.
-- **Not audited.** Research code: tested (23 contract tests including a fuzz
-  test, 29 service tests, cross-language signature vectors), but not
+- **Not audited.** Research code: tested (27 contract tests including a fuzz
+  test, 29 service tests for Arc and over 100 for Solana, cross-language
+  signature vectors), but not
   reviewed by a third party. Don't trust it with money you can't lose.
 
 ## License
