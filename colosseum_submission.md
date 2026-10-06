@@ -210,27 +210,80 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 
 ## 7. 2.5-Minute Video Pitch & Demo Script
 
-The demo below is the pitch: six scenes, each a real devnet transaction.
+The demo is the pitch: six scenes, each a real devnet transaction. It can be recorded two ways, and there is a script for each.
 
-### Live on devnet: the six scenes to record
-
-`python guard/demo/solana_devnet.py` runs these against the deployed program and prints an explorer link for each. One recorded run (2026-10-06):
-
-| Scene | What happened | Transaction |
+| | Version A: hosted Guard | Version B: local Guard |
 |---|---|---|
-| 1 | Owner opens the vault and funds it | [51Q1D1…](https://explorer.solana.com/tx/51Q1D13asYWch5q5DKWMJwaNtsdiVeVmnL1xEfADQXZ1FspAaAqGtGBCpYkE7fSot8nkLe9h2BnryctgmYVJQrKd?cluster=devnet) |
-| 2 | Guard co-signs a $3 payment; the vault pays | [2F3edF…](https://explorer.solana.com/tx/2F3edF9ocehyenzUvrp9tDgDZXcHqQhZFPAmMb2pcCd3NT3s9sCvknjCMkhLQWCkHsoz6eqD3epBwdKRPEdieXD7?cluster=devnet) |
-| 3 | Agent skips the Guard; the program fails it with `Custom(3)` MissingGuardCoSignature | [yTo6an…](https://explorer.solana.com/tx/yTo6an7jYUouBWWMZzMzVzYTfNgpFwpkKevGiaeo7cqJLxG5ZLpiBbWG96wV7umiP21KvV1wXUJr9ZipxwXfGEh?cluster=devnet) |
-| 4 | A $6 order against a $5 cap; the Guard won't sign | none: nothing to send |
-| 5 | Guardian kills the vault | [5dEKRQ…](https://explorer.solana.com/tx/5dEKRQGU4DtniJ1mNr9qumunZEzDz79SGo12PZ1DgPCR1T4ifucrKFJNMKhjzcyeqsZ138tqLds17LaLbHw6LRMU?cluster=devnet) |
-| 5 | A transfer the Guard approved before the kill fails with `Custom(4)` VaultKilled | [62diUw…](https://explorer.solana.com/tx/62diUwm9B769pnPa2d8mVttaFPbrCSBe9cmXfkPT2y74q4GoQwomd3bQwgTtgKCbGvBf3nuPVkUQ6U3uGTfY7BzV?cluster=devnet) |
-| 6 | Owner withdraws from the killed vault | [2WesDi…](https://explorer.solana.com/tx/2WesDiZqG7xbyNWeb9Xw8WXtrh4xmaaqvwBcHA9Sw3mupUKqYeH4Z2mtynMxqZVNp5xDzGLPiMVdJMpBoHKfSMMa?cluster=devnet) |
+| Command | `HYPERION_GUARD_URL=https://hyperion-guard-dijsyl2kwq-uc.a.run.app python guard/demo/solana_devnet.py` | `python guard/demo/solana_devnet.py` |
+| Where the Guard runs | The hosted API on Cloud Run | Inside the script |
+| The policy | Signed by the owner and sent over HTTP | Set directly |
+| SOL price | Live, so the dollar figures change from run to run | Fixed at $150, so they never change |
+| Figures on screen | About $2.40 paid, $4.01 cap, $4.81 refused (at $120 SOL) | $3.00 paid, $5.00 cap, $6.00 refused |
+| Shows | The whole product, as a user would meet it | The mechanism, with round numbers |
 
-Each run makes a fresh agent, guardian and Guard key and so a fresh vault; the links above are from one run.
+**Record Version A for the submission.** It shows a live service, a signed policy and a live price, which Version B can't. Keep Version B as the fallback if the network misbehaves on the day: it needs only devnet.
 
-### The script (2:30, about 360 spoken words)
+The vault program, the six scenes and what happens on-chain are identical in both.
 
-One terminal and one browser tab. No slides except the opening and closing cards. Everything on screen is the real demo running on devnet.
+### One recorded run of each (2026-10-06)
+
+| Scene | What happened | Version A (hosted) | Version B (local) |
+|---|---|---|---|
+| 1 | Owner opens the vault and funds it | [2xdcUj…](https://explorer.solana.com/tx/2xdcUjBzokY3YUP9dc1SNSifWE3A87zLmrqcpzfFVB3LhgXGF2eDPyt3i1YYSgmMqkqYh1DZ3t5mDnUDDE9srL6p?cluster=devnet) | [51Q1D1…](https://explorer.solana.com/tx/51Q1D13asYWch5q5DKWMJwaNtsdiVeVmnL1xEfADQXZ1FspAaAqGtGBCpYkE7fSot8nkLe9h2BnryctgmYVJQrKd?cluster=devnet) |
+| 2 | Guard co-signs a payment; the vault pays | $2.40 of a $4.01 cap: [GpdfeE…](https://explorer.solana.com/tx/GpdfeEbuEo578fJsWZXygtDXbMgMYFigePTRKRTDdqWDqNaUAvkTitMW5e25ASC44UNKRoGiQpFYbEAkoyfAth1?cluster=devnet) | $3.00 of a $5.00 cap: [2F3edF…](https://explorer.solana.com/tx/2F3edF9ocehyenzUvrp9tDgDZXcHqQhZFPAmMb2pcCd3NT3s9sCvknjCMkhLQWCkHsoz6eqD3epBwdKRPEdieXD7?cluster=devnet) |
+| 3 | Agent skips the Guard; the program fails it with `Custom(3)` MissingGuardCoSignature | [5xoHbW…](https://explorer.solana.com/tx/5xoHbWWwG7roD2LWfBPjxAw8zSq5tpsdPnwpVYP2gnG4LA6AtBjK5tdiyL8nCTp6kEAHCZ6FVK9j9hhjAD5qt8qq?cluster=devnet) | [yTo6an…](https://explorer.solana.com/tx/yTo6an7jYUouBWWMZzMzVzYTfNgpFwpkKevGiaeo7cqJLxG5ZLpiBbWG96wV7umiP21KvV1wXUJr9ZipxwXfGEh?cluster=devnet) |
+| 4 | An order over the cap; the Guard won't sign | $4.81: nothing to send | $6.00: nothing to send |
+| 5 | Guardian kills the vault | [MMn2QG…](https://explorer.solana.com/tx/MMn2QGAwrQsVCCQcNZV5vnKSrSKFCfm4UjnQAJTeGFPwNEgGCp7GGBjmciGbL5ZZRHoVVXeKFri5YLKELwQrUKA?cluster=devnet) | [5dEKRQ…](https://explorer.solana.com/tx/5dEKRQGU4DtniJ1mNr9qumunZEzDz79SGo12PZ1DgPCR1T4ifucrKFJNMKhjzcyeqsZ138tqLds17LaLbHw6LRMU?cluster=devnet) |
+| 5 | A transfer approved before the kill fails with `Custom(4)` VaultKilled | [Tp6qrQ…](https://explorer.solana.com/tx/Tp6qrQdKsgCyDkBMZqEZorRJn8pdXJVHkFwDSG8kbiUuykRwz23BBg6oWwa4Nv2aQWFP3YAjkNVNFLf7wYrKKfZ?cluster=devnet) | [62diUw…](https://explorer.solana.com/tx/62diUwm9B769pnPa2d8mVttaFPbrCSBe9cmXfkPT2y74q4GoQwomd3bQwgTtgKCbGvBf3nuPVkUQ6U3uGTfY7BzV?cluster=devnet) |
+| 6 | Owner withdraws from the killed vault | [22CvCT…](https://explorer.solana.com/tx/22CvCTXsLH5AJxCZMuckMEFffAsYqVB3RoCWeHYpvUKqVFBhiKXKavzvZZgo5jYDHEa8T7RmSJtxKv9dmjrmScnd?cluster=devnet) | [2WesDi…](https://explorer.solana.com/tx/2WesDiZqG7xbyNWeb9Xw8WXtrh4xmaaqvwBcHA9Sw3mupUKqYeH4Z2mtynMxqZVNp5xDzGLPiMVdJMpBoHKfSMMa?cluster=devnet) |
+
+Each run makes a fresh agent and guardian key, and so a fresh vault. The links above are from one run of each; yours will differ.
+
+---
+
+### Version A: the hosted Guard (2:30, about 375 spoken words)
+
+One terminal and two browser tabs: the Guard's API page and the Solana explorer. No slides except the opening and closing cards.
+
+**The dollar figures move with the price of SOL.** The script below uses the figures from the recorded run above. Say the ones on your own screen: the first payment is 0.02 SOL, the cap is set a third above it, and the refused order is 0.04 SOL.
+
+#### 0:00 – 0:20 · The problem
+- **On screen:** Title card: "An AI agent holds the keys. What stops it?"
+- **Voiceover:** "AI agents now trade and pay on Solana on their own. To do that, they hold a private key. One hallucinated number, one prompt injection, and the money is gone in a single slot, about four hundred milliseconds. An alert afterwards only tells you what you lost."
+
+#### 0:20 – 0:40 · What Hyperion Guard is
+- **On screen:** The architecture diagram from section 3, then the hosted Guard's `/docs` page for two seconds.
+- **Voiceover:** "Hyperion Guard has two halves. The agent's money sits in a vault, a Solana program that only pays when a second signature is present: the Guard's. The Guard is a service. It signs only after it has decoded the transaction and checked it against the owner's policy. This one is live. Let me show you, on devnet."
+
+#### 0:40 – 0:58 · Scene 1 and 2: open a vault, make a normal payment
+- **On screen:** Run the Version A command. Point at the `Guard` line, which shows the hosted URL, and the `SOL` line. Let scenes 1 and 2 print. Click the scene 2 link; show both signatures in the explorer.
+- **Voiceover:** "The owner opens a vault for the agent and sends the Guard a signed policy: about four dollars an order. The agent pays a merchant two dollars forty. The Guard prices SOL live, sees it's under the cap, and co-signs. Two signatures on-chain: the agent's and the Guard's."
+
+#### 0:58 – 1:16 · Scene 3: the agent goes around the Guard
+- **On screen:** Scene 3 output. Click the link; show the failed transaction and `custom program error: 0x3`.
+- **Voiceover:** "Now the agent is compromised and sends the same payment without asking the Guard. The program itself refuses it, on-chain: missing Guard co-signature. The merchant's balance hasn't moved. This is the point of the vault. The agent can't opt out."
+
+#### 1:16 – 1:30 · Scene 4: over the limit
+- **On screen:** Scene 4 output: `REJECTED_ORDER_CAP`, "Order notional $4.81 exceeds cap of $4.01".
+- **Voiceover:** "Next, an order worth four eighty-one against a cap of four dollars one. The Guard decodes the amount, refuses, and returns no signature. There's no transaction to send."
+
+#### 1:30 – 1:54 · Scene 5 and 6: the kill switch, and the owner's exit
+- **On screen:** Scene 5 output: the kill link, then the failed transfer with `0x4`. Then scene 6.
+- **Voiceover:** "Something looks wrong, so a guardian, a monitoring bot, kills the vault with one transaction. Here's a transfer the Guard had already approved a moment earlier. It fails too: vault killed. The guardian can stop the agent, but it can't take the money. Only the owner can, and here the owner withdraws everything from the killed vault."
+
+#### 1:54 – 2:16 · What's real, and what isn't yet
+- **On screen:** The repository: `guard/contracts_solana/`, then the green CI run.
+- **Voiceover:** "What you saw is a native Solana program on devnet and a hosted Guard. It decodes Jupiter and Raydium swaps and token transfers, sizes them at a live price, and refuses what it can't size. It judges only transactions the agent signed, and it remembers its policies across a restart. It's a prototype: devnet only, not audited, one instance, and token amounts are checked by the Guard, not yet capped on-chain."
+
+#### 2:16 – 2:30 · Close
+- **On screen:** Closing card: repository URL, the Guard's URL and the program id.
+- **Voiceover:** "Agents will hold money. Hyperion Guard is how an owner sets the rules and knows they hold. It's open source, and it's running: the links are in the repository."
+
+---
+
+### Version B: the local Guard (2:30, about 360 spoken words)
+
+One terminal and one browser tab for the explorer. The Guard runs inside the script at a fixed $150 SOL, so the figures are the same on every run.
 
 #### 0:00 – 0:20 · The problem
 - **On screen:** Title card: "An AI agent holds the keys. What stops it?"
@@ -241,7 +294,7 @@ One terminal and one browser tab. No slides except the opening and closing cards
 - **Voiceover:** "Hyperion Guard has two halves. The agent's money sits in a vault, a Solana program. The vault only pays when a second signature is present: the Guard's. And the Guard only signs after it has decoded the transaction and checked it against the owner's policy. Let me show you, live on devnet."
 
 #### 0:40 – 0:55 · Scene 1 and 2: open a vault, make a normal payment
-- **On screen:** Run `python guard/demo/solana_devnet.py`. Let scenes 1 and 2 print. Click the scene 2 link; show both signatures in the explorer.
+- **On screen:** Run the Version B command. Let scenes 1 and 2 print. Click the scene 2 link; show both signatures in the explorer.
 - **Voiceover:** "The owner opens a vault for the agent and funds it. The agent pays a merchant three dollars. The policy allows five, so the Guard co-signs, and the vault pays. Two signatures: the agent's and the Guard's."
 
 #### 0:55 – 1:15 · Scene 3: the agent goes around the Guard
@@ -258,13 +311,17 @@ One terminal and one browser tab. No slides except the opening and closing cards
 
 #### 1:55 – 2:15 · What's real, and what isn't yet
 - **On screen:** The repository: `guard/contracts_solana/`, then the green CI run.
-- **Voiceover:** "What you saw is a native Solana program, deployed on devnet, and a Guard that decodes Jupiter and Raydium swaps and token transfers, and refuses what it can't size. The tests run the compiled program, and Python and Rust agree byte for byte. It's a prototype: devnet only, not audited, and token amounts are checked by the Guard, not yet capped on-chain."
+- **Voiceover:** "What you saw is a native Solana program, deployed on devnet, and a Guard that decodes Jupiter and Raydium swaps and token transfers, and refuses what it can't size. Here the Guard ran inside the demo; the same code is hosted as an API. The tests run the compiled program, and Python and Rust agree byte for byte. It's a prototype: devnet only, not audited, and token amounts are checked by the Guard, not yet capped on-chain."
 
 #### 2:15 – 2:30 · Close
 - **On screen:** Closing card: repository URL and the program id.
 - **Voiceover:** "Agents will hold money. Hyperion Guard is how an owner sets the rules and knows they hold. It's open source. The program id and every transaction from this demo are in the repository."
 
+---
+
 ### Recording checklist
+
+For both versions:
 
 1. Check the wallet has at least 0.2 SOL on devnet: `solana balance --url devnet`.
 2. Do one practice run first. Each run opens a new vault, so the links change every time; record the explorer tabs from the same run you narrate.
@@ -273,6 +330,12 @@ One terminal and one browser tab. No slides except the opening and closing cards
 5. In the explorer, keep `?cluster=devnet` visible in the address bar, so nobody mistakes this for mainnet.
 6. Failed transactions show `custom program error: 0x3` and `0x4`. Zoom in on that line.
 7. Record the voiceover separately and lay it over the picture. It's easier to hit 2:30.
+
+For Version A only:
+
+8. Open `https://hyperion-guard-dijsyl2kwq-uc.a.run.app/v1/solana/health` once before recording. The service scales to zero, and the first request after a quiet spell takes a few seconds to wake it.
+9. Write down the three dollar figures from your run before recording the voiceover, and say those.
+10. If a request is refused with `429`, you've hit the rate limit (10 policy updates a minute from one address). Wait a minute and run again.
 
 ---
 
