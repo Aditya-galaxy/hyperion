@@ -291,11 +291,28 @@ class SolanaGuardEngine:
                     violation_details=f"Slippage tolerance {inst.slippage_bps} bps exceeds max limit of {policy.max_slippage_bps} bps"
                 )
 
+            # Check B.1: a swap with no limit on the other side has unlimited slippage.
+            # Raydium carries a minimum-out (or maximum-in) instead of a bps figure.
+            inner = inst.details.get("inner") if inst.operation == "VAULT_EXECUTE" else inst.details
+            if isinstance(inner, dict) and inner.get("unbounded"):
+                return SolanaVerdict(
+                    approved=False,
+                    status="REJECTED_EXCESSIVE_SLIPPAGE",
+                    agent_id=agent_id,
+                    recent_blockhash=decoded.recent_blockhash,
+                    evaluated_at_ns=now_ns,
+                    cosigner_pubkey=self.cosigner_pubkey_b58,
+                    cosigner_signature_b58=None,
+                    decoded_operations=operations,
+                    violation_details=(f"{inner.get('instruction_name')} sets no limit on the other side of the swap "
+                                       "(minimum out of 0, or no maximum in): unlimited slippage"),
+                )
+
             # Check C: Notional Size Estimation (a vault Execute counts as its inner call)
             kind = inst.details.get("inner_operation") if inst.operation == "VAULT_EXECUTE" else inst.operation
             if kind == "VAULT_TRANSFER_SOL":
                 kind = "SOL_TRANSFER"
-            if kind in ("JUPITER_SWAP", "PHOENIX_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED") and inst.input_amount is not None:
+            if kind in ("JUPITER_SWAP", "RAYDIUM_SWAP", "PHOENIX_SWAP", "TOKEN_TRANSFER", "TOKEN_TRANSFER_CHECKED") and inst.input_amount is not None:
                 # Assume 6 decimals (standard for USDC on Solana)
                 est_usd = float(inst.input_amount) / 1e6
                 total_estimated_usd += est_usd

@@ -31,7 +31,7 @@ SYSTEM_PROGRAM_ID = "11111111111111111111111111111111"
 ALLOWLISTED_PROGRAMS = {
     JUPITER_V6_PROGRAM_ID: "Jupiter V6 Aggregator",
     PHOENIX_PROGRAM_ID: "Phoenix LOB",
-    RAYDIUM_V4_PROGRAM_ID: "Raydium V4",
+    RAYDIUM_V4_PROGRAM_ID: "Raydium AMM V4",
     SPL_TOKEN_PROGRAM_ID: "SPL Token",
     SYSTEM_PROGRAM_ID: "Solana System Program",
 }
@@ -152,6 +152,41 @@ def decode_phoenix_instruction(data: bytes, accounts: list[str]) -> tuple[str, i
 
     return "PHOENIX_OPERATION", None, None, None, details
 
+RAYDIUM_SWAPS = {9: "swapBaseIn", 11: "swapBaseOut", 16: "swapBaseInV2", 17: "swapBaseOutV2"}
+
+
+def decode_raydium_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
+    """
+    Decodes Raydium AMM V4 swaps (raydium-amm, program/src/instruction.rs).
+
+      - 1 byte: tag. 9 swapBaseIn, 11 swapBaseOut, 16 and 17 their V2 forms
+      - swapBaseIn:  amount_in u64, minimum_amount_out u64
+      - swapBaseOut: max_amount_in u64, amount_out u64
+
+    The instruction carries no slippage figure, only the limit on the other
+    side, so the bps collar can't apply. What can be checked is that there is
+    a limit at all: `unbounded` is set when minimum_amount_out is 0 (base-in)
+    or max_amount_in is u64::MAX (base-out).
+
+    Everything else Raydium offers (deposit, withdraw, pool admin) is
+    UNKNOWN_RAYDIUM, which the Guard refuses.
+    """
+    if not data or data[0] not in RAYDIUM_SWAPS:
+        tag = data[0] if data else None
+        return "UNKNOWN_RAYDIUM", None, None, None, {"raydium_tag": tag, "error": f"Raydium instruction {tag} is not a swap"}
+    name = RAYDIUM_SWAPS[data[0]]
+    if len(data) != 17:
+        return "UNKNOWN_RAYDIUM", None, None, None, {"error": f"{name} must be 17 bytes, got {len(data)}"}
+    first, second = struct.unpack_from("<QQ", data, 1)
+    if "BaseIn" in name:
+        in_amount, out_amount, unbounded = first, second, second == 0
+    else:
+        in_amount, out_amount, unbounded = first, second, first == 0xFFFF_FFFF_FFFF_FFFF
+    details: dict[str, Any] = {"instruction_name": name, "in_amount_raw": in_amount, "out_amount_raw": out_amount,
+                               "exact": "in" if "BaseIn" in name else "out", "unbounded": unbounded}
+    return "RAYDIUM_SWAP", in_amount, out_amount, None, details
+
+
 def decode_spl_token_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None, int | None, dict[str, Any]]:
     """Decodes SPL Token Program transfers."""
     if len(data) < 1:
@@ -193,6 +228,8 @@ def decode_instruction_for_program(prog_id: str, inst_data: bytes, inst_accounts
         return decode_jupiter_instruction(inst_data, inst_accounts)
     if prog_id == PHOENIX_PROGRAM_ID:
         return decode_phoenix_instruction(inst_data, inst_accounts)
+    if prog_id == RAYDIUM_V4_PROGRAM_ID:
+        return decode_raydium_instruction(inst_data, inst_accounts)
     if prog_id == SPL_TOKEN_PROGRAM_ID:
         return decode_spl_token_instruction(inst_data, inst_accounts)
     if prog_id == SYSTEM_PROGRAM_ID:

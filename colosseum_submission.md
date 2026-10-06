@@ -14,7 +14,7 @@
 
 Autonomous trading agents on Solana are rapidly executing across Jupiter, Phoenix LOB, and Raydium. However, autonomous agents suffer from failure modes: model hallucinations, prompt injection attacks, stale pricing, and toxic sandwich MEV exploitation by searchers. Because Solana processes blocks in ~400ms, **post-trade monitoring is a post-mortem**. 
 
-**Hyperion Guard** is an institutional pre-trade risk gateway and cryptographic co-signer designed for the Solana agentic economy (prototype). Before any raw Solana transaction payload reaches validators, Hyperion Guard intercepts the wire bytes, decodes the compiled instructions (Jupiter V6, Phoenix, SPL Token, System and the Guarded Vault; Raydium can be allow-listed but its instructions aren't decoded yet), checks strict risk firewalls, and co-signs compliant transactions with an authorized Ed25519 key. If an agent hallucinates an excessive swap size, accepts toxic slippage, or is targeted by an unapproved program, the Guard rejects the transaction before a single lamport is risked.
+**Hyperion Guard** is an institutional pre-trade risk gateway and cryptographic co-signer designed for the Solana agentic economy (prototype). Before any raw Solana transaction payload reaches validators, Hyperion Guard intercepts the wire bytes, decodes the compiled instructions (Jupiter V6, Phoenix, Raydium AMM V4 swaps, SPL Token, System and the Guarded Vault), checks strict risk firewalls, and co-signs compliant transactions with an authorized Ed25519 key. If an agent hallucinates an excessive swap size, accepts toxic slippage, or is targeted by an unapproved program, the Guard rejects the transaction before a single lamport is risked.
 
 ---
 
@@ -69,7 +69,7 @@ The Guard alone protects an agent that chooses to ask it. The vault is what make
 
 ### Core Firewalls
 - **Deterministic Program Allowlisting:** Dissects compiled transaction account keys. Rejects any transaction interacting with unauthorized programs or drainers.
-- **Deep DEX Instruction Decoding:** Native unpacking of Anchor 8-byte discriminators and variable-length route plans with 19-byte parameter suffixes for Jupiter V6 (`sharedAccountsRoute`, `route`), and Phoenix LOB (`newOrder`, `swap`). Raydium is not decoded yet.
+- **Deep DEX Instruction Decoding:** Native unpacking of Anchor 8-byte discriminators and variable-length route plans with 19-byte parameter suffixes for Jupiter V6 (`sharedAccountsRoute`, `route`), Phoenix LOB (`newOrder`, `swap`), and Raydium AMM V4 swaps (`swapBaseIn`, `swapBaseOut` and their V2 forms). Raydium's instruction has no slippage figure, so the Guard requires a real limit instead (a non-zero minimum out, or a maximum in) and refuses Raydium's non-swap instructions.
 - **Anti-MEV Slippage Collar:** Directly inspects `slippage_bps` encoded in DEX swaps, bounding maximum acceptable slippage to eliminate sandwich vulnerability.
 - **Notional Size Caps:** Binds maximum USD exposure per order and throttles runaway trading loops.
 - **Cryptographic Kill Switch:** Owner/Guardian Ed25519-signed endpoint immediately revokes an agent's trading authority without requiring on-chain transaction delays. Guardians may trip the kill switch, but only the registered owner can revive trading.
@@ -92,7 +92,7 @@ Hyperion Guard is built as a zero-overhead, sub-millisecond service within the H
 ### Supported Solana Protocols
 - **Jupiter V6 Aggregator:** `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4`
 - **Phoenix Limit Order Book:** `PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY`
-- **Raydium AMM V4 (allow-listed, not decoded):** `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8`
+- **Raydium AMM V4 (swaps):** `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8`
 - **SPL Token Program:** `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`
 - **Solana System Program:** `11111111111111111111111111111111`
 
@@ -156,8 +156,8 @@ cd guard/service
 - 15 Rust High-Performance Quant Engine Tests (`cargo test`)
 - 15 Solana vault tests: 5 unit, 10 integration against the compiled program in LiteSVM (`cd guard/contracts_solana && cargo build-sbf && cargo test`)
 - 27 EVM Guard & Calldata Decoder Tests (`forge test`)
-- 88 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
-- **Total: 145 automated tests, all passing**
+- 102 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
+- **Total: 159 automated tests, all passing**
 
 ### Jito MEV & Sandwich Attack Simulation Benchmarks
 
