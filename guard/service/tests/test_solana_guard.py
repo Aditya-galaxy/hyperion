@@ -27,6 +27,7 @@ from hyperion_guard.solana import (
 )
 from hyperion_guard.solana.control import policy_message
 from hyperion_guard.solana.decoder import USDC_MINT, associated_token_address
+from hyperion_guard.solana.tx import add_signature
 
 
 def build_jupiter_ix_data(
@@ -133,6 +134,18 @@ def build_mock_solana_tx(
     return bytes(raw)
 
 
+# The agent in the API tests: its key is in the policy, and it signs what it submits.
+AGENT_KEY = ECC.generate(curve="ed25519")
+AGENT_PUBKEY = b58encode(AGENT_KEY.public_key().export_key(format="raw"))
+
+
+def agent_signed(tx_bytes: bytes, key: ECC.EccKey = AGENT_KEY) -> bytes:
+    """`tx_bytes` with the fee payer's signature filled in by `key`."""
+    message = decode_solana_transaction(tx_bytes).message_bytes
+    return add_signature(tx_bytes, decode_solana_transaction(tx_bytes).account_keys[0],
+                         eddsa.new(key, "rfc8032").sign(message))
+
+
 def sign_policy_payload(
     key: ECC.EccKey,
     agent_id: str,
@@ -144,8 +157,9 @@ def sign_policy_payload(
     guardian: str = "",
     allowed_programs: list[str] | None = None,
     require_guard_signer: bool = True,
+    agent: str | None = None,
 ) -> str:
-    msg = policy_message(agent_id=agent_id, owner=owner_pubkey, guardian=guardian,
+    msg = policy_message(agent_id=agent_id, agent=agent or AGENT_PUBKEY, owner=owner_pubkey, guardian=guardian,
                          max_order_notional_usd=max_notional, max_slippage_bps=max_slippage,
                          policy_version=policy_version, nonce=nonce, require_guard_signer=require_guard_signer,
                          allowed_programs=allowed_programs)
@@ -462,7 +476,7 @@ def test_solana_api_lifecycle():
     # 2. Reject unauthenticated policy setup
     res_unauth = client.post("/v1/solana/policy", json={
         "agent_id": "test-agent-solana",
-        "owner_solana_pubkey": owner_pubkey_b58,
+        "owner_solana_pubkey": owner_pubkey_b58, "agent_solana_pubkey": AGENT_PUBKEY,
         "max_order_notional_usd": 1500.0,
         "max_slippage_bps": 50,
     })
@@ -475,7 +489,7 @@ def test_solana_api_lifecycle():
     )
     res_set = client.post("/v1/solana/policy", json={
         "agent_id": "test-agent-solana",
-        "owner_solana_pubkey": owner_pubkey_b58,
+        "owner_solana_pubkey": owner_pubkey_b58, "agent_solana_pubkey": AGENT_PUBKEY,
         "guardian_solana_pubkey": guardian_pubkey_b58,
         "max_order_notional_usd": 1500.0,
         "max_slippage_bps": 50,
@@ -488,13 +502,20 @@ def test_solana_api_lifecycle():
     assert res_set.status_code == 200
     assert res_set.json()["ok"] is True
 
+    # 3.1 A policy must name the agent's key
+    res_no_agent = client.post("/v1/solana/policy", json={
+        "agent_id": "another-agent", "owner_solana_pubkey": owner_pubkey_b58,
+        "max_order_notional_usd": 1500.0, "max_slippage_bps": 50, "policy_version": 1, "nonce": 1,
+        "signature_b58": sig_v1})
+    assert res_no_agent.status_code == 422 and "agent_solana_pubkey" in res_no_agent.json()["detail"]
+
     # 4. Reject policy replay / non-monotonic version bump (policy_version <= 1)
     sig_replay = sign_policy_payload(
         owner_key, "test-agent-solana", owner_pubkey_b58, 2000.0, 50, nonce=2, policy_version=1
     )
     res_replay = client.post("/v1/solana/policy", json={
         "agent_id": "test-agent-solana",
-        "owner_solana_pubkey": owner_pubkey_b58,
+        "owner_solana_pubkey": owner_pubkey_b58, "agent_solana_pubkey": AGENT_PUBKEY,
         "max_order_notional_usd": 2000.0,
         "max_slippage_bps": 50,
         "policy_version": 1,
@@ -509,7 +530,7 @@ def test_solana_api_lifecycle():
     )
     res_imposter = client.post("/v1/solana/policy", json={
         "agent_id": "test-agent-solana",
-        "owner_solana_pubkey": imposter_pubkey_b58,
+        "owner_solana_pubkey": imposter_pubkey_b58, "agent_solana_pubkey": AGENT_PUBKEY,
         "max_order_notional_usd": 50000.0,
         "max_slippage_bps": 500,
         "policy_version": 2,
@@ -526,8 +547,18 @@ def test_solana_api_lifecycle():
 
     # 7. Check safe transaction (Base64 encoding) with Guard co-signer
     safe_data = build_jupiter_ix_data(500_000_000, 498_000_000, 30)
-    tx_bytes = build_mock_solana_tx(JUPITER_V6_PROGRAM_ID, safe_data, guard_pubkey_b58=engine.pubkey_b58)
+    unsigned_tx = build_mock_solana_tx(JUPITER_V6_PROGRAM_ID, safe_data, agent_pubkey_b58=AGENT_PUBKEY,
+                                       guard_pubkey_b58=engine.pubkey_b58)
+    tx_bytes = agent_signed(unsigned_tx)
     tx_b64 = base64.b64encode(tx_bytes).decode("ascii")
+
+    # 6.1 Only a transaction the agent's key has signed is judged at all.
+    for not_the_agents in (unsigned_tx, agent_signed(unsigned_tx, key=imposter_key)):
+        res_stranger = client.post("/v1/solana/check", json={
+            "agent_id": "test-agent-solana", "tx_bytes": base64.b64encode(not_the_agents).decode("ascii"),
+            "encoding": "base64"}).json()
+        assert (res_stranger["approved"], res_stranger["status"]) == (False, "REJECTED_NOT_SIGNED_BY_AGENT")
+    assert engine.order_timestamps.get("test-agent-solana", []) == []      # and nothing was counted
 
     res_check = client.post("/v1/solana/check", json={
         "agent_id": "test-agent-solana",
@@ -540,9 +571,17 @@ def test_solana_api_lifecycle():
     assert body["status"] == "APPROVED"
     assert body["cosigner_signature_b58"] is not None
 
+    # 7.1 Asking again about the same transaction gets the same signature and isn't counted twice.
+    again = client.post("/v1/solana/check", json={"agent_id": "test-agent-solana", "tx_bytes": tx_b64,
+                                                  "encoding": "base64"}).json()
+    assert (again["approved"], again["cosigner_signature_b58"]) == (True, body["cosigner_signature_b58"])
+    assert len(engine.order_timestamps["test-agent-solana"]) == 1
+    assert len(engine.daily_spend_tracker["test-agent-solana"]) == 1
+
     # 8. Check violating transaction (Excessive slippage: 80 bps > 50 bps)
     bad_data = build_jupiter_ix_data(500_000_000, 498_000_000, 80)
-    bad_tx_bytes = build_mock_solana_tx(JUPITER_V6_PROGRAM_ID, bad_data, guard_pubkey_b58=engine.pubkey_b58)
+    bad_tx_bytes = agent_signed(build_mock_solana_tx(JUPITER_V6_PROGRAM_ID, bad_data, agent_pubkey_b58=AGENT_PUBKEY,
+                                                     guard_pubkey_b58=engine.pubkey_b58))
     bad_tx_b58 = b58encode(bad_tx_bytes)
 
     res_bad = client.post("/v1/solana/check", json={
@@ -611,7 +650,7 @@ def test_solana_api_lifecycle():
         guardian=guardian_pubkey_b58, allowed_programs=[JUPITER_V6_PROGRAM_ID],
     )
     signed_v2 = {
-        "agent_id": "test-agent-solana", "owner_solana_pubkey": owner_pubkey_b58,
+        "agent_id": "test-agent-solana", "owner_solana_pubkey": owner_pubkey_b58, "agent_solana_pubkey": AGENT_PUBKEY,
         "guardian_solana_pubkey": guardian_pubkey_b58, "max_order_notional_usd": 1500.0,
         "max_slippage_bps": 50, "policy_version": 2, "nonce": 13, "signature_b58": sig_v2,
         "allowed_programs": [JUPITER_V6_PROGRAM_ID], "require_guard_signer": True,
@@ -619,7 +658,8 @@ def test_solana_api_lifecycle():
     drainer = "Drain1111111111111111111111111111111111111111"
     for tampered in ({**signed_v2, "allowed_programs": [JUPITER_V6_PROGRAM_ID, drainer]},
                      {**signed_v2, "require_guard_signer": False},
-                     {**signed_v2, "guardian_solana_pubkey": imposter_pubkey_b58}):
+                     {**signed_v2, "guardian_solana_pubkey": imposter_pubkey_b58},
+                     {**signed_v2, "agent_solana_pubkey": imposter_pubkey_b58}):
         assert client.post("/v1/solana/policy", json=tampered).status_code == 401
     assert client.post("/v1/solana/policy", json=signed_v2).status_code == 200
     assert client.post("/v1/solana/policy", json=signed_v2).status_code == 409    # and it can't be replayed

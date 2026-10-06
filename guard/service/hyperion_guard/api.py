@@ -154,6 +154,14 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         if not owner_pubkey:
             raise HTTPException(422, "owner_solana_pubkey is required")
 
+        # The agent's own key: /v1/solana/check only judges transactions it has signed.
+        agent_pubkey = str(body.get("agent_solana_pubkey", ""))
+        try:
+            if len(b58decode(agent_pubkey)) != 32:
+                raise ValueError
+        except ValueError:
+            raise HTTPException(422, "agent_solana_pubkey is required: the agent's 32-byte key, base58") from None
+
         guardian_pubkey = str(body.get("guardian_solana_pubkey", ""))
         max_notional = float(body.get("max_order_notional_usd", 5_000.0))
         max_slippage = int(body.get("max_slippage_bps", 100))
@@ -169,7 +177,7 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
             raise HTTPException(401, "Missing owner Ed25519 signature (signature_b58)")
 
         # The signature covers every field, so nothing can be changed in transit.
-        msg = policy_message(agent_id=agent_id, owner=owner_pubkey, guardian=guardian_pubkey,
+        msg = policy_message(agent_id=agent_id, agent=agent_pubkey, owner=owner_pubkey, guardian=guardian_pubkey,
                              max_order_notional_usd=max_notional, max_slippage_bps=max_slippage,
                              policy_version=policy_version, nonce=nonce, require_guard_signer=require_guard,
                              allowed_programs=allowed, vault_address=vault_address)
@@ -190,6 +198,7 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
             agent_id=agent_id,
             owner_solana_pubkey=owner_pubkey,
             guardian_solana_pubkey=guardian_pubkey,
+            agent_solana_pubkey=agent_pubkey,
             max_order_notional_usd=max_notional,
             max_slippage_bps=max_slippage,
             policy_version=policy_version,
@@ -202,6 +211,7 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
             "ok": True,
             "agent_id": agent_id,
             "policy": {
+                "agent_solana_pubkey": policy.agent_solana_pubkey,
                 "owner_solana_pubkey": policy.owner_solana_pubkey,
                 "guardian_solana_pubkey": policy.guardian_solana_pubkey,
                 "max_order_notional_usd": policy.max_order_notional_usd,
@@ -219,6 +229,7 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
             raise HTTPException(404, f"No policy configured for Solana agent '{agent_id}'")
         return {
             "agent_id": agent_id,
+            "agent_solana_pubkey": policy.agent_solana_pubkey,
             "owner_solana_pubkey": policy.owner_solana_pubkey,
             "guardian_solana_pubkey": policy.guardian_solana_pubkey,
             "max_order_notional_usd": policy.max_order_notional_usd,

@@ -10,7 +10,7 @@
 
 ## 1. Executive Summary & Tagline
 
-> **Tagline:** The sub-millisecond pre-trade firewall & Ed25519 cryptographic co-signing risk engine protecting autonomous AI trading agents on Solana.
+> **Tagline:** The pre-trade firewall and Ed25519 co-signer that an autonomous trading agent on Solana can't go around.
 
 Autonomous trading agents on Solana are rapidly executing across Jupiter, Phoenix LOB, and Raydium. However, autonomous agents suffer from failure modes: model hallucinations, prompt injection attacks, stale pricing, and toxic sandwich MEV exploitation by searchers. Because Solana processes blocks in ~400ms, **post-trade monitoring is a post-mortem**. 
 
@@ -141,6 +141,8 @@ else:
     print(verdict.status, verdict.violation_details)       # no signature: the vault won't pay
 ```
 
+The owner's signed policy names the agent's key, and the Guard judges only transactions that key has signed (`REJECTED_NOT_SIGNED_BY_AGENT` otherwise), so nobody else can use up the agent's rate limit or daily cap. Asking twice about the same transaction returns the same signature and counts once.
+
 A transaction that doesn't name the Guard as a required signer, such as one taken as-is from Jupiter's swap API, is refused (`REJECTED_MISSING_GUARD_SIGNER`): the Guard's opinion of it couldn't be enforced. A policy can turn that requirement off to use the Guard as an advisory check only.
 
 The client is Python. There is no TypeScript client yet.
@@ -177,8 +179,8 @@ cd guard/service
 - 15 Rust High-Performance Quant Engine Tests (`cargo test`)
 - 15 Solana vault tests: 5 unit, 10 integration against the compiled program in LiteSVM (`cd guard/contracts_solana && cargo build-sbf && cargo test`)
 - 27 EVM Guard & Calldata Decoder Tests (`forge test`)
-- 220 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
-- **Total: 277 automated tests, all passing**
+- 229 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
+- **Total: 286 automated tests, all passing**
 
 ### Jito MEV & Sandwich Attack Simulation Benchmarks
 
@@ -191,10 +193,10 @@ To evaluate anti-sandwich protection dynamics, we built a standalone mathematica
 | **Searcher Gross Profit** | +$121.63 USDC (75% to Jito Validator) | $0.00 USDC (Searcher drops bundle) |
 | **Agent Capital Loss** | **-$497.10 USDC (-2.0% loss)** | **$0.00 USDC** (the trade isn't sent) |
 | **Ed25519 Co-Signature** | N/A | **WITHHELD** (`REJECTED_EXCESSIVE_SLIPPAGE`) |
-| **Median Guard Latency**| N/A | **32 µs** to refuse; **0.36 ms** to approve and sign |
+| **Median Guard Latency**| N/A | about **1 ms** to refuse, **1.2 ms** to approve and sign |
 
 > [!NOTE]
-> Measured on a laptop, in Python: a refusal takes a median of **32 µs**; an approval takes **0.36 ms**, nearly all of it the Ed25519 signature. Both are under 0.1% of Solana's 400 ms slot. Two things cost more, once each: the first transaction from a wallet (about 0.3 to 0.8 ms to work out its token accounts), and the first use of a lookup table, a token account or a token's price (prices again every 10 seconds), each a network call of roughly 0.2 to 0.3 s to a public endpoint.
+> Measured on a laptop, in Python: a refusal takes a median of **0.96 ms** and an approval **1.21 ms**, under 0.5% of Solana's 400 ms slot. Nearly all of it is Ed25519: 0.9 ms to check the agent's signature and 0.3 ms to sign. Three things cost more, once each: the first transaction from a wallet (about 0.3 to 0.8 ms to work out its token accounts), and the first use of a lookup table, a token account or a token's price (prices again every 10 seconds), each a network call of roughly 0.2 to 1 s to a public endpoint.
 
 ---
 

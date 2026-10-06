@@ -143,6 +143,7 @@ def main() -> None:
     ])
     assert err is None, err
     guard.set_policy(SolanaAgentPolicy(agent_id="agent-1", owner_solana_pubkey=ids["owner"],
+                                       agent_solana_pubkey=ids["agent"],
                                        max_order_notional_usd=5.0, allowed_programs=[PROGRAM], vault_address=vault))
     print(f"   vault holds {balance(vault) / SOL:.4f} SOL; on-chain cap 0.05 SOL a transaction; "
           f"Guard policy $5 an order\n   {link(sig)}")
