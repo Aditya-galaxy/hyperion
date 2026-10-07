@@ -49,5 +49,6 @@ guard/paywall/node_modules/
 
 # Hyperion Guard demo hot keys (never commit)
 guard/demo/.env.arc
+guard/demo/.env.arc.*
 proof/*.egg-info/
 data/proofs/

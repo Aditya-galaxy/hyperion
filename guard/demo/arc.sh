@@ -10,7 +10,8 @@ set -euo pipefail
 #   1. An encrypted Foundry keystore for the owner, funded with USDC on that network:
 #        cast wallet import guard-owner --interactive
 #      (testnet USDC: https://faucet.circle.com, choose Arc Testnet)
-#   2. guard/demo/.env.arc (git-ignored) with three hot keys used only by the demo:
+#   2. guard/demo/.env.arc.<network>, or guard/demo/.env.arc for both (git-ignored),
+#      with three hot keys used only by the demo:
 #        GUARD_SIGNER_KEY=0x…   the Guard service's signing key
 #        AGENT_KEY=0x…          the demo trading agent
 #        GUARDIAN_KEY=0x…       the monitoring bot that can kill the agent
@@ -33,7 +34,9 @@ case "$NETWORK" in
 esac
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-ENV_FILE="$ROOT/guard/demo/.env.arc"
+# Each network can have its own keys: .env.arc.<network> if it exists, else .env.arc.
+ENV_FILE="$ROOT/guard/demo/.env.arc.$NETWORK"
+[ -f "$ENV_FILE" ] || ENV_FILE="$ROOT/guard/demo/.env.arc"
 PY="${PYTHON:-$ROOT/guard/service/.venv/bin/python}"
 ACCOUNT="${GUARD_ACCOUNT:-guard-owner}"
 [ -f "$ENV_FILE" ] || { echo "missing $ENV_FILE (see the header of this script)"; exit 1; }
