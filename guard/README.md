@@ -25,7 +25,8 @@ Guard does:
   ranges, so anyone holding a verdict can prove it's in the record, and gaps
   can't be hidden.
 - **Agents pay per check** in USDC through Circle Gateway Nanopayments
-  (x402): $0.001 a check.
+  (x402): $0.001 a check. Tested end to end on Arc testnet; the paywall is
+  not hosted yet.
 
 The checks are modelled on Hyperion's Rust pre-trade risk controller
 ([`src/risk/controller.rs`](../src/risk/controller.rs)): kill switch first,

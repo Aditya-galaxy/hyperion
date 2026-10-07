@@ -61,8 +61,11 @@ trading.
    nonce. Rejected, replayed, altered and pre-kill approvals revert on-chain.
 4. **An audit trail.** The Guard anchors Merkle roots of every verdict on Arc
    in contiguous ranges, so a verdict can be proven and gaps can't be hidden.
-5. **USDC-native payments.** Agents pay per check in USDC through Circle
-   Gateway Nanopayments (x402), $0.001 a check. Gas on Arc is USDC too.
+5. **USDC-native payments.** A paywall in front of the Guard charges agents
+   per check in USDC through Circle Gateway Nanopayments (x402), $0.001 a
+   check. Tested end to end on Arc testnet on 2026-10-07: a wallet paid
+   $0.001 from its Gateway balance and got the Guard's signed verdict back.
+   The paywall runs locally and is not hosted yet. Gas on Arc is USDC too.
 
 ## Demo
 
