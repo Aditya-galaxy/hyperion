@@ -204,6 +204,56 @@ Free endpoints:
 
 ## Deploying on Arc
 
+**Live on Arc mainnet** (chain 5042), deployed 2026-10-07 with
+`bash guard/demo/arc.sh mainnet`. Addresses are in
+[`deployments/mainnet.json`](deployments/mainnet.json).
+
+| Contract | Address |
+|---|---|
+| HyperionGuard | [`0x9683450F53B767AFfa080b6B3C91A1fA8F966890`](https://explorer.arc.io/address/0x9683450F53B767AFfa080b6B3C91A1fA8F966890) |
+| GuardedExecutor | [`0xAf816b1E338584abAA2c2dcFba01B345cb6978AA`](https://explorer.arc.io/address/0xAf816b1E338584abAA2c2dcFba01B345cb6978AA) |
+| DemoVenue | [`0x22F78ff7a8220E5E516d2c45aa540452cf49B77A`](https://explorer.arc.io/address/0x22F78ff7a8220E5E516d2c45aa540452cf49B77A) |
+
+The six-scene demo ran against it:
+
+| Scene | What happened | Transaction |
+|---|---|---|
+| 1 | A $325.50 order, approved and executed through the executor | [0xcda2bb…](https://explorer.arc.io/tx/0xcda2bb3b3fa0e4aa005bce86a75bcb9b1deaa3f443c5eeb4bd2c26801b1b06b2) |
+| 5 | The guardian kills the agent | [0xf0ce2f…](https://explorer.arc.io/tx/0xf0ce2f7215bbe8c618d5afb9215e0deb1db8bc5c87837f0702514c74a3d93e8c) |
+| 6 | The Guard anchors the Merkle root of verdicts 1–11 | [0x224ee7…](https://explorer.arc.io/tx/0x224ee712477e76795b4796d8df1adc184309c9291277528e51775060e0736891) |
+
+The deployment and the demo together cost about $0.07 of USDC in gas. The
+contracts are not audited: don't put money behind them.
+
+**Also on Arc testnet** (chain 5042002), deployed the same day with
+`bash guard/demo/arc.sh testnet`. Addresses are in
+[`deployments/testnet.json`](deployments/testnet.json).
+
+| Contract | Address |
+|---|---|
+| HyperionGuard | [`0xA8Fc10f47BA1a486B1899e65204eEac099c59C93`](https://testnet.arcscan.app/address/0xA8Fc10f47BA1a486B1899e65204eEac099c59C93) |
+| GuardedExecutor | [`0x1204E4aFaE17C4f88801ED688268D8F4D65Ddf22`](https://testnet.arcscan.app/address/0x1204E4aFaE17C4f88801ED688268D8F4D65Ddf22) |
+| DemoVenue | [`0x8c4eB9Db9F84232f0781F9489063594FDF04fE92`](https://testnet.arcscan.app/address/0x8c4eB9Db9F84232f0781F9489063594FDF04fE92) |
+
+The six-scene demo ran against it. Three of its transactions:
+
+| Scene | What happened | Transaction |
+|---|---|---|
+| 1 | A $325.50 order, approved and executed through the executor | [0xa1ca58…](https://testnet.arcscan.app/tx/0xa1ca586142821d2595e80db66074aa14d53516c87b2812eca186b459bef1fee3) |
+| 5 | The guardian kills the agent | [0x679305…](https://testnet.arcscan.app/tx/0x679305d00538edd844f1874ffee070dbc0ce5094e10e0f7e5ff0a8a0bf6e537e) |
+| 6 | The Guard anchors the Merkle root of verdicts 1–11 | [0x262634…](https://testnet.arcscan.app/tx/0x262634cba8d1c989e6c003e3c04175b4d86fe61cd23562a3541e71c0f829ca0a) |
+
+The prompt-injected order and the pre-kill approval were refused by the
+executor (`VerdictRejected(NotApproved)`, `VerdictRejected(Killed)`): those
+calls revert, so they leave no transaction.
+
+On both networks the demo agent stays killed after a run; the owner revives
+it to run again.
+
+`arc.sh` does all of the below in one go. On testnet it can use a throwaway
+owner key from the git-ignored `guard/demo/.env.arc` (`GUARD_OWNER_KEY`), so
+it runs unattended; mainnet always uses the keystore.
+
 Use an encrypted keystore (`cast wallet import guard-owner --interactive`),
 never a private key on the command line.
 

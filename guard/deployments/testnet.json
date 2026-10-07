@@ -1,0 +1,12 @@
+{
+  "network": "arc-testnet",
+  "chainId": 5042002,
+  "HyperionGuard": "0xA8Fc10f47BA1a486B1899e65204eEac099c59C93",
+  "GuardedExecutor": "0x1204E4aFaE17C4f88801ED688268D8F4D65Ddf22",
+  "DemoVenue": "0x8c4eB9Db9F84232f0781F9489063594FDF04fE92",
+  "admin": "0x04C8E54261e2De8f101Fc89B11fFa21dB524AACD",
+  "guardSigner": "0x4982aE7b5dc9d6ee1473e0C4b7A7627a3f661B2e",
+  "demoAgent": "0x10a397726Da54FfbdDB07ccDf67FE8c9eAc37f1D",
+  "demoGuardian": "0x0cd48eFBe4528E410B133341C03C56EBF9C81aB3",
+  "explorer": "https://testnet.arcscan.app/address/0xA8Fc10f47BA1a486B1899e65204eEac099c59C93"
+}

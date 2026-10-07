@@ -1,0 +1,12 @@
+{
+  "network": "arc-mainnet",
+  "chainId": 5042,
+  "HyperionGuard": "0x9683450F53B767AFfa080b6B3C91A1fA8F966890",
+  "GuardedExecutor": "0xAf816b1E338584abAA2c2dcFba01B345cb6978AA",
+  "DemoVenue": "0x22F78ff7a8220E5E516d2c45aa540452cf49B77A",
+  "admin": "0x38A48A588203918bFC10f8e4Ba5eA48Aa1B52524",
+  "guardSigner": "0xC30B9620eaC5CCD2aC6C4D9dd522a776cb313C7c",
+  "demoAgent": "0x9433FE30CB95eD895851B62FeD9F13459Fb13A9a",
+  "demoGuardian": "0x9FC67805B390EF06d336b3e135dC61aD55A31dD6",
+  "explorer": "https://explorer.arc.io/address/0x9683450F53B767AFfa080b6B3C91A1fA8F966890"
+}
