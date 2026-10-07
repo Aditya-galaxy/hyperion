@@ -77,12 +77,13 @@ done
 cd "$ROOT/guard/contracts"
 NONCE=$(cast nonce "$OWNER" --rpc-url "$RPC")
 GUARD=$(cast compute-address "$OWNER" --nonce "$NONCE" | awk '{print $NF}')
-GUARD_SIGNER="$SIGNER" forge script script/Deploy.s.sol:Deploy --rpc-url "$RPC" "${SIGN[@]}" --broadcast \
+# --sender: with a keystore, forge doesn't take the script's msg.sender from the signer on its own
+GUARD_SIGNER="$SIGNER" forge script script/Deploy.s.sol:Deploy --rpc-url "$RPC" "${SIGN[@]}" --sender "$OWNER" --broadcast \
   | grep -E "HyperionGuard|admin|guardSigner"
 EXECUTOR=$(cast compute-address "$OWNER" --nonce $((NONCE + 2)) | awk '{print $NF}')   # +1 is registerAgent
 VENUE=$(cast compute-address "$OWNER" --nonce $((NONCE + 3)) | awk '{print $NF}')
 GUARD="$GUARD" AGENT="$AGENT" GUARDIAN="$GUARDIAN" \
-  forge script script/Deploy.s.sol:DemoSetup --rpc-url "$RPC" "${SIGN[@]}" --broadcast \
+  forge script script/Deploy.s.sol:DemoSetup --rpc-url "$RPC" "${SIGN[@]}" --sender "$OWNER" --broadcast \
   | grep -E "agent|GuardedExecutor|DemoVenue"
 [ "$(cast code "$GUARD" --rpc-url "$RPC")" != "0x" ] || { echo "no code at $GUARD"; exit 1; }
 
