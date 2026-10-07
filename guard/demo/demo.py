@@ -147,7 +147,10 @@ class Demo:
         if state.killed:
             sys.exit(f"the agent is killed from a previous run; revive it first:\n  {REVIVE_HINT}")
         p = state.policy
-        say(f"Agent {self.agent} on chain {self.chain.chain_id}")
+        # Say where this is running: the same demo runs on Arc and on a local test chain.
+        self.where = {5042: "Arc", 5042002: "Arc testnet", 31337: "a local test chain"}.get(
+            self.chain.chain_id, f"chain {self.chain.chain_id}")
+        say(f"Agent {self.agent} on {self.where} (chain {self.chain.chain_id})")
         print(f"  policy v{state.policy_version}: {usd(p.max_order_notional)} per order, "
               f"{usd(p.max_daily_notional)} a day, collar {p.collar_bps / 100:.2f}%, "
               f"{p.max_orders_per_minute} orders a minute")
@@ -175,7 +178,7 @@ class Demo:
                    for _ in range(p.max_orders_per_minute + 1)]
         self.note("order burst", reasons[-1], "—")
 
-        say("5. The guardian kills the agent on Arc")
+        say(f"5. The guardian kills the agent on {self.where}")
         t0 = time.monotonic()
         tx = self.chain.transact(self.guardian_key, KILL + encode(["address"], [self.agent]))
         print(f"  kill mined in {time.monotonic() - t0:.1f}s  {self.explorer}/tx/{tx}")
@@ -187,7 +190,7 @@ class Demo:
         else:
             self.note("after the kill", r["reason"], "(no pre-kill approval to test)")
 
-        say("6. Anchoring the verdict record on Arc")
+        say(f"6. Anchoring the verdict record on {self.where}")
         a = self.guard.anchor()
         if a:
             print(f"  verdicts {a['first_seq']}–{a['last_seq']}, root {a['root'][:18]}…  "
