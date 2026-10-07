@@ -70,7 +70,7 @@ def revert_reason(message: str) -> str:
     return name
 
 
-REVIVE_HINT = "cast send $GUARD_CONTRACT 'revive(address)' $AGENT --account guard-owner --rpc-url arc_testnet"
+REVIVE_HINT = "cast send $GUARD_CONTRACT 'revive(address)' $AGENT --account guard-owner --rpc-url $GUARD_RPC_URL"
 
 
 def env(name: str) -> str:
