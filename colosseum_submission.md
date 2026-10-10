@@ -115,7 +115,7 @@ USDC and USDT are taken at $1. SOL and every other token are priced by a price s
 
 ---
 
-## 5. Developer Integration (Python)
+## 5. Developer Integration (Python and TypeScript)
 
 The Guard only binds an agent if its signature is needed for the transaction to land. So the agent's money sits in a Guarded Vault, and the agent's transactions are vault instructions with the Guard as a required signer. This is the flow [`guard/demo/solana_devnet.py`](guard/demo/solana_devnet.py) runs on devnet:
 
@@ -153,7 +153,18 @@ HYPERION_GUARD_URL=https://hyperion-guard-dijsyl2kwq-uc.a.run.app python guard/d
 
 **The Guard's state survives a restart.** Policies and kill switches, control-message nonces, the throttle and the day's spend, and the transactions already approved are written to a store (memory, a SQLite file, or Firestore) before a verdict leaves; if the write fails, nothing is approved. The co-signing key comes from a secret, not from start-up. The Guard is written for one running instance and answers one request at a time.
 
-The client is Python. There is no TypeScript client yet.
+**From TypeScript**, the same flow with [`guard/client-ts`](guard/client-ts/) and `@solana/web3.js`:
+
+```ts
+const guard = new GuardClient("https://hyperion-guard-dijsyl2kwq-uc.a.run.app");
+const tx = new Transaction({ feePayer: agent.publicKey, recentBlockhash })
+  .add(transferSolIx(PROGRAM, vault, agent.publicKey, await guard.cosignerKey(), merchant, 20_000_000n));
+tx.partialSign(agent);
+await guard.checkAndCosign("agent-1", tx);       // throws GuardRefused if the Guard says no
+await connection.sendRawTransaction(tx.serialize());
+```
+
+The TypeScript client is tested byte for byte against the Python one, and `npm run demo` runs the six scenes on devnet from TypeScript. It isn't published to npm yet.
 
 ---
 
@@ -187,8 +198,9 @@ cd guard/service
 - 15 Rust High-Performance Quant Engine Tests (`cargo test`)
 - 15 Solana vault tests: 5 unit, 10 integration against the compiled program in LiteSVM (`cd guard/contracts_solana && cargo build-sbf && cargo test`)
 - 27 EVM Guard & Calldata Decoder Tests (`forge test`)
-- 271 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
-- **Total: 328 automated tests, all passing**
+- 272 Python Guard, vault client, MEV Harness & Attestation Tests (`pytest guard/service/tests proof/tests`), 4 of which send Guard-co-signed transactions to the compiled vault program
+- 14 TypeScript client tests, against vectors made by the Python client (`cd guard/client-ts && npm test`)
+- **Total: 343 automated tests, all passing**
 
 ### Jito MEV & Sandwich Attack Simulation Benchmarks
 

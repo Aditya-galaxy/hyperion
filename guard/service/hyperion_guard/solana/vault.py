@@ -119,6 +119,12 @@ def simple(program_id: str, tag: int, caller: str, vault: str) -> Ix:
     return Ix(program_id, [AccountMeta(caller, True, False), AccountMeta(vault, False, True)], bytes([tag]))
 
 
+def withdraw(program_id: str, owner: str, vault: str, to: str, lamports: int) -> Ix:
+    """The owner takes SOL out of the vault, killed or not."""
+    return Ix(program_id, [AccountMeta(owner, True, False), AccountMeta(vault, False, True),
+                           AccountMeta(to, False, True)], bytes([6]) + struct.pack("<Q", lamports))
+
+
 # ── decoding, for the Guard ──────────────────────────────────────────────────
 
 def decode_vault_instruction(data: bytes, accounts: list[str]) -> tuple[str, int | None, int | None,
