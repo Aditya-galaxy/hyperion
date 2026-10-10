@@ -113,11 +113,6 @@ def system_transfer(frm: str, to: str, lamports: int) -> v.Ix:
                 struct.pack("<IQ", 2, lamports))
 
 
-def withdraw(owner: str, vault: str, to: str, lamports: int) -> v.Ix:
-    return v.Ix(PROGRAM, [v.AccountMeta(owner, True, False), v.AccountMeta(vault, False, True),
-                          v.AccountMeta(to, False, True)], bytes([6]) + struct.pack("<Q", lamports))
-
-
 class LocalGuard:
     """The Guard, running inside this script."""
     where = "in this script"
@@ -258,7 +253,7 @@ def main() -> None:
     rent = rpc("getMinimumBalanceForRentExemption", [rpc("getAccountInfo", [vault, {"encoding": "base64"}])
                                                      ["value"]["space"]])
     spare = balance(vault) - rent
-    sig, err = owner_tx([withdraw(ids["owner"], vault, ids["owner"], spare)])
+    sig, err = owner_tx([v.withdraw(PROGRAM, ids["owner"], vault, ids["owner"], spare)])
     assert err is None, err
     print(f"   withdrew {spare / SOL:.4f} SOL to the owner; the agent could not have\n   {link(sig)}")
 

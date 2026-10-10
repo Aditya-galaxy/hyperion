@@ -53,6 +53,10 @@ instead of an EVM wallet:
   - anything it can't identify or price is refused.
 - **Live demo:** `python guard/demo/solana_devnet.py` runs six scenes on
   devnet and prints an explorer link for each.
+- **A TypeScript client** ([client-ts](client-ts/README.md)), for
+  `@solana/web3.js`: the vault's instructions and the Guard's API, tested
+  byte for byte against the Python client. `npm run demo` runs the same six
+  scenes from TypeScript.
 
 A policy names the agent's own key, and `/v1/solana/check` judges only
 transactions that key has signed, so nobody else can use up an agent's rate

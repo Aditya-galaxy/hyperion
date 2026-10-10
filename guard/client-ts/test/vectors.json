@@ -1,0 +1,280 @@
+{
+ "keys": {
+  "program": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+  "owner": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+  "agent": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+  "guardian": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+  "guard": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+  "to": "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF",
+  "allowedPrograms": [
+   "cGfHiC6Kgg3FpFZvgwGcswsCRtp4aBP2fzuXRQPizuN",
+   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+  ]
+ },
+ "vault": {
+  "address": "7nBk9JTMcododJyarAbXMD5p5MHNr6xPJd1sWdTCeKcq",
+  "bump": 250
+ },
+ "initialize": {
+  "maxLamports": "50000000",
+  "programId": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+  "data": "0004040404040404040404040404040404040404040404040404040404040404040303030303030303030303030303030303030303030303030303030303030303050505050505050505050505050505050505050505050505050505050505050580f0fa020000000002090909090909090909090909090909090909090909090909090909090909090906ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9",
+  "keys": [
+   {
+    "pubkey": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "isSigner": true,
+    "isWritable": true
+   },
+   {
+    "pubkey": "7nBk9JTMcododJyarAbXMD5p5MHNr6xPJd1sWdTCeKcq",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "11111111111111111111111111111111",
+    "isSigner": false,
+    "isWritable": false
+   }
+  ]
+ },
+ "transferSol": {
+  "lamports": "20000000",
+  "programId": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+  "data": "01002d310100000000",
+  "keys": [
+   {
+    "pubkey": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+    "isSigner": true,
+    "isWritable": false
+   },
+   {
+    "pubkey": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+    "isSigner": true,
+    "isWritable": false
+   },
+   {
+    "pubkey": "7nBk9JTMcododJyarAbXMD5p5MHNr6xPJd1sWdTCeKcq",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF",
+    "isSigner": false,
+    "isWritable": true
+   }
+  ]
+ },
+ "transferSolMax": {
+  "lamports": "18446744073709551615",
+  "programId": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+  "data": "01ffffffffffffffff",
+  "keys": [
+   {
+    "pubkey": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+    "isSigner": true,
+    "isWritable": false
+   },
+   {
+    "pubkey": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+    "isSigner": true,
+    "isWritable": false
+   },
+   {
+    "pubkey": "7nBk9JTMcododJyarAbXMD5p5MHNr6xPJd1sWdTCeKcq",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF",
+    "isSigner": false,
+    "isWritable": true
+   }
+  ]
+ },
+ "execute": {
+  "inner": {
+   "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+   "data": "03a025260000000000",
+   "keys": [
+    {
+     "pubkey": "k7FaK87WHGVXzkaoHb7CdVPgkKDQhZ29VLDeBVbDfYn",
+     "isSigner": false,
+     "isWritable": true
+    },
+    {
+     "pubkey": "p2Yicb86aZig616Eav2VWG9vuXR5mEqhtzshZYBxzsV",
+     "isSigner": false,
+     "isWritable": true
+    },
+    {
+     "pubkey": "7nBk9JTMcododJyarAbXMD5p5MHNr6xPJd1sWdTCeKcq",
+     "isSigner": true,
+     "isWritable": false
+    }
+   ]
+  },
+  "programId": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+  "data": "0203a025260000000000",
+  "keys": [
+   {
+    "pubkey": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+    "isSigner": true,
+    "isWritable": false
+   },
+   {
+    "pubkey": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+    "isSigner": true,
+    "isWritable": false
+   },
+   {
+    "pubkey": "7nBk9JTMcododJyarAbXMD5p5MHNr6xPJd1sWdTCeKcq",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "isSigner": false,
+    "isWritable": false
+   },
+   {
+    "pubkey": "k7FaK87WHGVXzkaoHb7CdVPgkKDQhZ29VLDeBVbDfYn",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "p2Yicb86aZig616Eav2VWG9vuXR5mEqhtzshZYBxzsV",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "7nBk9JTMcododJyarAbXMD5p5MHNr6xPJd1sWdTCeKcq",
+    "isSigner": false,
+    "isWritable": false
+   }
+  ]
+ },
+ "kill": {
+  "programId": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+  "data": "03",
+  "keys": [
+   {
+    "pubkey": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+    "isSigner": true,
+    "isWritable": false
+   },
+   {
+    "pubkey": "7nBk9JTMcododJyarAbXMD5p5MHNr6xPJd1sWdTCeKcq",
+    "isSigner": false,
+    "isWritable": true
+   }
+  ]
+ },
+ "revive": {
+  "programId": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+  "data": "04",
+  "keys": [
+   {
+    "pubkey": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "isSigner": true,
+    "isWritable": false
+   },
+   {
+    "pubkey": "7nBk9JTMcododJyarAbXMD5p5MHNr6xPJd1sWdTCeKcq",
+    "isSigner": false,
+    "isWritable": true
+   }
+  ]
+ },
+ "withdraw": {
+  "lamports": "80000000",
+  "programId": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+  "data": "0600b4c40400000000",
+  "keys": [
+   {
+    "pubkey": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "isSigner": true,
+    "isWritable": false
+   },
+   {
+    "pubkey": "7nBk9JTMcododJyarAbXMD5p5MHNr6xPJd1sWdTCeKcq",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF",
+    "isSigner": false,
+    "isWritable": true
+   }
+  ]
+ },
+ "policyMessages": [
+  {
+   "policy": {
+    "agent_id": "agent-1",
+    "agent": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+    "owner": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "guardian": "",
+    "max_order_notional_usd": 5000.0,
+    "max_slippage_bps": 100,
+    "policy_version": 1,
+    "nonce": 1,
+    "require_guard_signer": true,
+    "allowed_programs": null,
+    "vault_address": ""
+   },
+   "hex": "6879706572696f6e2d67756172642f736f6c616e612f706f6c6963792f76333a7b226167656e74223a22436b74527551326d74746752476b584a74796b73644b486a5564633243345467447a794239386f457a7938222c226167656e745f6964223a226167656e742d31222c22616c6c6f7765645f70726f6772616d73223a6e756c6c2c22677561726469616e223a22222c226d61785f6f726465725f6e6f74696f6e616c5f757364223a22353030302e3030222c226d61785f736c6970706167655f627073223a3130302c226e6f6e6365223a312c226f776e6572223a2234764a394a5531624a4a4539364657534a4b7648736d6d46414443673467705a516666345033626b4c4b69222c22706f6c6963795f76657273696f6e223a312c22726571756972655f67756172645f7369676e6572223a747275652c227661756c745f61646472657373223a22227d"
+  },
+  {
+   "policy": {
+    "agent_id": "desk/agent 2",
+    "agent": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+    "owner": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "guardian": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+    "max_order_notional_usd": 3.96,
+    "max_slippage_bps": 25,
+    "policy_version": 1791356763,
+    "nonce": 1791356763,
+    "require_guard_signer": false,
+    "allowed_programs": [
+     "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+     "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+     "cGfHiC6Kgg3FpFZvgwGcswsCRtp4aBP2fzuXRQPizuN"
+    ],
+    "vault_address": "7nBk9JTMcododJyarAbXMD5p5MHNr6xPJd1sWdTCeKcq"
+   },
+   "hex": "6879706572696f6e2d67756172642f736f6c616e612f706f6c6963792f76333a7b226167656e74223a22436b74527551326d74746752476b584a74796b73644b486a5564633243345467447a794239386f457a7938222c226167656e745f6964223a226465736b2f6167656e742032222c22616c6c6f7765645f70726f6772616d73223a5b22546f6b656e6b65675166655a79694e77414a624e62474b5046584357754276663953733632335651354441222c22555335313747353936356179646b5a343648533338514c6937555169536f6a7572666251664b43454c4678222c22634766486943364b6767334670465a7667774763737773435274703461425032667a7558525150697a754e225d2c22677561726469616e223a22476742614373334e4342755a4e31326b434a67415736337964716f68466b4845646664455842507a4c4871222c226d61785f6f726465725f6e6f74696f6e616c5f757364223a22332e3936222c226d61785f736c6970706167655f627073223a32352c226e6f6e6365223a313739313335363736332c226f776e6572223a2234764a394a5531624a4a4539364657534a4b7648736d6d46414443673467705a516666345033626b4c4b69222c22706f6c6963795f76657273696f6e223a313739313335363736332c22726571756972655f67756172645f7369676e6572223a66616c73652c227661756c745f61646472657373223a22376e426b394a544d636f646f644a7961724162584d443570354d484e723678504a64317357645443654b6371227d"
+  },
+  {
+   "policy": {
+    "agent_id": "agent-\u00e9-\u6771",
+    "agent": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+    "owner": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "guardian": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+    "max_order_notional_usd": 1234.5,
+    "max_slippage_bps": 0,
+    "policy_version": 2,
+    "nonce": 7,
+    "require_guard_signer": true,
+    "allowed_programs": [
+     "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx"
+    ],
+    "vault_address": ""
+   },
+   "hex": "6879706572696f6e2d67756172642f736f6c616e612f706f6c6963792f76333a7b226167656e74223a22436b74527551326d74746752476b584a74796b73644b486a5564633243345467447a794239386f457a7938222c226167656e745f6964223a226167656e742d5c75303065392d5c7536373731222c22616c6c6f7765645f70726f6772616d73223a5b22555335313747353936356179646b5a343648533338514c6937555169536f6a7572666251664b43454c4678225d2c22677561726469616e223a22476742614373334e4342755a4e31326b434a67415736337964716f68466b4845646664455842507a4c4871222c226d61785f6f726465725f6e6f74696f6e616c5f757364223a22313233342e3530222c226d61785f736c6970706167655f627073223a302c226e6f6e6365223a372c226f776e6572223a2234764a394a5531624a4a4539364657534a4b7648736d6d46414443673467705a516666345033626b4c4b69222c22706f6c6963795f76657273696f6e223a322c22726571756972655f67756172645f7369676e6572223a747275652c227661756c745f61646472657373223a22227d"
+  }
+ ],
+ "actionMessages": [
+  {
+   "action": "kill",
+   "agentId": "agent-1",
+   "nonce": 2,
+   "hex": "6879706572696f6e2d67756172642f736f6c616e612f6b696c6c2f76313a6167656e742d313a32"
+  },
+  {
+   "action": "revive",
+   "agentId": "desk/agent 2",
+   "nonce": 1791356764,
+   "hex": "6879706572696f6e2d67756172642f736f6c616e612f7265766976652f76313a6465736b2f6167656e7420323a31373931333536373634"
+  }
+ ]
+}

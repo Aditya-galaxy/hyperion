@@ -171,3 +171,35 @@ jobs:
       run: |
         pip install -e "guard/service[test]" "solders==0.29.0"
         pytest guard/service/tests/test_solana_vault_e2e.py -q
+
+  guard-client-ts:
+    name: Guard client (TypeScript)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: guard/client-ts
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # Node runs the TypeScript tests directly (type stripping), so no build step.
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: "24"
+        cache: npm
+        cache-dependency-path: guard/client-ts/package-lock.json
+
+    - name: Install
+      run: npm ci --no-audit --no-fund
+
+    - name: Type-check
+      run: npm run typecheck
+
+    # Against test/vectors.json, which the Guard service's tests check is what Python produces.
+    - name: Test
+      run: npm test
+
+    - name: Build
+      run: npm run build
