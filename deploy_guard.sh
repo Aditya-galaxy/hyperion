@@ -9,7 +9,8 @@ set -euo pipefail
 #   - the Guard's co-signing key, a 32-byte Ed25519 seed, in Secret Manager.
 #     It is generated here the first time and never printed. Every vault that
 #     names this Guard depends on it: deleting the secret orphans them;
-#   - the service itself, public, one instance at most. The Guard keeps a copy
+#   - the service itself, public, one instance at most, kept warm by default
+#     (GUARD_MIN_INSTANCES=0 to scale to zero). The Guard keeps a copy
 #     of its state in memory and must not run as two instances.
 #
 # State (policies, nonces, usage, approvals) is kept in the project's default
@@ -30,6 +31,9 @@ SA_NAME="${GUARD_SERVICE_ACCOUNT:-hyperion-guard}"
 SOLANA_RPC_URL="${GUARD_SOLANA_RPC_URL:-https://api.devnet.solana.com}"
 VAULT_PROGRAM_ID="${GUARD_VAULT_PROGRAM_ID:-9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq}"
 MAX_AGENTS="${GUARD_MAX_AGENTS:-200}"
+# 1 keeps an instance warm, so the first request isn't a cold start of several
+# seconds; it costs a small amount while idle. 0 scales to zero.
+MIN_INSTANCES="${GUARD_MIN_INSTANCES:-1}"
 RATE_LIMIT="${GUARD_RATE_LIMIT:-120}"
 RATE_LIMIT_WRITES="${GUARD_RATE_LIMIT_WRITES:-10}"
 RATE_LIMIT_GLOBAL="${GUARD_RATE_LIMIT_GLOBAL:-1200}"
@@ -45,7 +49,7 @@ echo "==========================================================================
 echo "  HYPERION GUARD: HOSTING THE API"
 echo "================================================================================"
 echo "  Project: ${PROJECT_ID}"
-echo "  Service: ${SERVICE} (Cloud Run, ${REGION}, public, 1 instance at most)"
+echo "  Service: ${SERVICE} (Cloud Run, ${REGION}, public, ${MIN_INSTANCES} to 1 instances)"
 echo "  Solana:  ${SOLANA_RPC_URL}, vault program ${VAULT_PROGRAM_ID}"
 echo "  Limits:  ${RATE_LIMIT}/min per address (${RATE_LIMIT_WRITES} writes), ${RATE_LIMIT_GLOBAL}/min overall, ${MAX_AGENTS} agents"
 echo
@@ -74,7 +78,7 @@ gcloud run deploy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" \
     --source "$ROOT/guard/service" \
     --service-account "$SA" \
     --allow-unauthenticated \
-    --min-instances 0 --max-instances 1 --concurrency 20 --memory 512Mi --cpu 1 --timeout 30 \
+    --min-instances "$MIN_INSTANCES" --max-instances 1 --concurrency 20 --memory 512Mi --cpu 1 --timeout 30 \
     --set-secrets "HYPERION_SOLANA_COSIGNER_KEY=${SECRET}:latest" \
     --set-env-vars "HYPERION_SOLANA_STATE=firestore,HYPERION_SOLANA_PRICES=jupiter,HYPERION_SOLANA_RPC_URL=${SOLANA_RPC_URL},HYPERION_VAULT_PROGRAM_ID=${VAULT_PROGRAM_ID},HYPERION_SOLANA_MAX_AGENTS=${MAX_AGENTS},HYPERION_RATE_LIMIT=${RATE_LIMIT},HYPERION_RATE_LIMIT_WRITES=${RATE_LIMIT_WRITES},HYPERION_RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL},HYPERION_TRUSTED_PROXIES=1" \
     --quiet
