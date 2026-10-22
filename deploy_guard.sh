@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Host the Hyperion Guard API (the Solana Guard) on Cloud Run.
+# Host the Hyperion Guard API (the Solana and Hyperliquid Guards) on Cloud Run.
 #
 # What this sets up, all in one project:
 #   - a service account for the Guard, allowed to read and write Firestore and
@@ -9,6 +9,9 @@ set -euo pipefail
 #   - the Guard's co-signing key, a 32-byte Ed25519 seed, in Secret Manager.
 #     It is generated here the first time and never printed. Every vault that
 #     names this Guard depends on it: deleting the secret orphans them;
+#   - the Hyperliquid co-signing key, a secp256k1 private key, in a second
+#     secret, made and kept the same way. Every multi-sig account that names
+#     this Guard as a signer depends on it;
 #   - the service itself, public, one instance at most, kept warm by default
 #     (GUARD_MIN_INSTANCES=0 to scale to zero). The Guard keeps a copy
 #     of its state in memory and must not run as two instances.
@@ -27,6 +30,7 @@ PROJECT_ID="${GCP_PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 REGION="${GUARD_REGION:-us-central1}"
 SERVICE="${GUARD_SERVICE:-hyperion-guard}"
 SECRET="${GUARD_SECRET:-hyperion-guard-solana-cosigner}"
+HL_SECRET="${GUARD_HYPERLIQUID_SECRET:-hyperion-guard-hyperliquid-cosigner}"
 SA_NAME="${GUARD_SERVICE_ACCOUNT:-hyperion-guard}"
 SOLANA_RPC_URL="${GUARD_SOLANA_RPC_URL:-https://api.devnet.solana.com}"
 VAULT_PROGRAM_ID="${GUARD_VAULT_PROGRAM_ID:-9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq}"
@@ -63,15 +67,19 @@ echo "[+] Letting it use Firestore"
 gcloud projects add-iam-policy-binding "$PROJECT_ID" --member "serviceAccount:${SA}" \
     --role roles/datastore.user --condition=None >/dev/null
 
-if ! gcloud secrets describe "$SECRET" --project "$PROJECT_ID" >/dev/null 2>&1; then
-    echo "[+] Generating the co-signing key into secret ${SECRET} (not shown)"
-    python3 -c "import os, sys; sys.stdout.write(os.urandom(32).hex())" \
-        | gcloud secrets create "$SECRET" --project "$PROJECT_ID" --replication-policy automatic --data-file=- >/dev/null
-else
-    echo "[+] Using the co-signing key already in secret ${SECRET}"
-fi
-gcloud secrets add-iam-policy-binding "$SECRET" --project "$PROJECT_ID" --member "serviceAccount:${SA}" \
-    --role roles/secretmanager.secretAccessor >/dev/null
+# 32 random bytes serve as either key: an Ed25519 seed, or a secp256k1 private key
+# (below the curve order with overwhelming probability).
+for secret in "$SECRET" "$HL_SECRET"; do
+    if ! gcloud secrets describe "$secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+        echo "[+] Generating a co-signing key into secret ${secret} (not shown)"
+        python3 -c "import os, sys; sys.stdout.write(os.urandom(32).hex())" \
+            | gcloud secrets create "$secret" --project "$PROJECT_ID" --replication-policy automatic --data-file=- >/dev/null
+    else
+        echo "[+] Using the co-signing key already in secret ${secret}"
+    fi
+    gcloud secrets add-iam-policy-binding "$secret" --project "$PROJECT_ID" --member "serviceAccount:${SA}" \
+        --role roles/secretmanager.secretAccessor >/dev/null
+done
 
 echo "[+] Building and deploying"
 gcloud run deploy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" \
@@ -79,7 +87,7 @@ gcloud run deploy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" \
     --service-account "$SA" \
     --allow-unauthenticated \
     --min-instances "$MIN_INSTANCES" --max-instances 1 --concurrency 20 --memory 512Mi --cpu 1 --timeout 30 \
-    --set-secrets "HYPERION_SOLANA_COSIGNER_KEY=${SECRET}:latest" \
+    --set-secrets "HYPERION_SOLANA_COSIGNER_KEY=${SECRET}:latest,HYPERION_HYPERLIQUID_COSIGNER_KEY=${HL_SECRET}:latest" \
     --set-env-vars "HYPERION_SOLANA_STATE=firestore,HYPERION_SOLANA_PRICES=jupiter,HYPERION_SOLANA_RPC_URL=${SOLANA_RPC_URL},HYPERION_VAULT_PROGRAM_ID=${VAULT_PROGRAM_ID},HYPERION_SOLANA_MAX_AGENTS=${MAX_AGENTS},HYPERION_RATE_LIMIT=${RATE_LIMIT},HYPERION_RATE_LIMIT_WRITES=${RATE_LIMIT_WRITES},HYPERION_RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL},HYPERION_TRUSTED_PROXIES=1" \
     --quiet
 
@@ -87,3 +95,4 @@ URL="$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region 
 echo
 echo "[+] Live at ${URL}"
 curl -fsS "${URL}/v1/solana/health" && echo
+curl -fsS "${URL}/v1/hyperliquid/health" && echo
