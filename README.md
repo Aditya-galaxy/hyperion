@@ -56,6 +56,12 @@ the agent's owner set, and only then co-signs.
   six-scene demo with `python guard/demo/solana_devnet.py`. There are Python
   and [TypeScript](guard/client-ts/README.md) clients. A hosted Guard
   for devnet runs at [https://hyperion-guard-dijsyl2kwq-uc.a.run.app](https://hyperion-guard-dijsyl2kwq-uc.a.run.app/docs).
+- **On Hyperliquid**, the agent trades from a native multi-sig account:
+  owner, agent and Guard, any two of three. Hyperliquid enforces it, so there
+  is nothing to deploy. The Guard co-signs perp orders within the owner's caps
+  and price collar, and never withdrawals or signer changes. See
+  [guard/README.md](guard/README.md#also-on-hyperliquid), and run
+  `python guard/demo/hyperliquid_testnet.py` on testnet.
 - **On Arc** (live on **Arc mainnet**: [`0x9683…6890`](https://explorer.arc.io/address/0x9683450F53B767AFfa080b6B3C91A1fA8F966890)),
   limits and the kill switch live in a contract, and a
   `GuardedExecutor` wallet only executes a call that carries a live approval.

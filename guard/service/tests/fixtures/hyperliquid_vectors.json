@@ -1,0 +1,400 @@
+{
+ "sdk": "hyperliquid-python-sdk==0.24.0",
+ "keys": {
+  "account": "0x0101010101010101010101010101010101010101010101010101010101010101",
+  "agent": "0x0202020202020202020202020202020202020202020202020202020202020202",
+  "guard": "0x0303030303030303030303030303030303030303030303030303030303030303",
+  "owner": "0x0404040404040404040404040404040404040404040404040404040404040404"
+ },
+ "addresses": {
+  "account": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+  "agent": "0x5050A4F4b3f9338C3472dcC01A87C76A144b3c9c",
+  "guard": "0x3325a78425F17a7E487Eb5666b2bFd93aBb06c70",
+  "owner": "0xc48B812bB43401392c037381AcA934F4069C0517"
+ },
+ "nonce": 1760000000000,
+ "expires_after": 1760000060000,
+ "actions": {
+  "order": {
+   "type": "order",
+   "orders": [
+    {
+     "a": 3,
+     "b": true,
+     "p": "81000",
+     "s": "0.001",
+     "r": false,
+     "t": {
+      "limit": {
+       "tif": "Ioc"
+      }
+     }
+    }
+   ],
+   "grouping": "na"
+  },
+  "cancel": {
+   "type": "cancel",
+   "cancels": [
+    {
+     "a": 3,
+     "o": 123456
+    }
+   ]
+  }
+ },
+ "cases": {
+  "mainnet/order": {
+   "hash": "b406432a87e3397370e6b610e346a691ece5369a5d40daa26a5e425f34d714be",
+   "hash_no_expiry": "f12c2e0b0e6f00a0564113e69309b2e2f53cec6dcda4c965bd00de59bfb13bf6",
+   "plain": {
+    "r": "0x228711f991393dd593be8ffb1869c7a551efebe80b8c623a5c73cbf9b3aae751",
+    "s": "0x1046407274ae9030959973547d6936d55a43ddda92b27d6651acd3831a7fd69c",
+    "v": 28
+   },
+   "cosigned": {
+    "agent": {
+     "r": "0xb41197986b19925796e15958ef2508e5db4b2a089b6e9dbb2a805119620adb80",
+     "s": "0x28e4a8776d28a56a25cfdf7743a5d2100c414e5fb5d9904859c280c754faf1d4",
+     "v": 28
+    },
+    "guard": {
+     "r": "0x76e1bd733ec20698d1fb57bf4ac3d01551412d0c69c28c2a33248bdf68973754",
+     "s": "0x2de015b262708a44ba979ce15d59c66c05d448100dbbabe633236b8042069525",
+     "v": 27
+    }
+   },
+   "multi_sig_action": {
+    "type": "multiSig",
+    "signatureChainId": "0x66eee",
+    "signatures": [
+     {
+      "r": "0xb41197986b19925796e15958ef2508e5db4b2a089b6e9dbb2a805119620adb80",
+      "s": "0x28e4a8776d28a56a25cfdf7743a5d2100c414e5fb5d9904859c280c754faf1d4",
+      "v": 28
+     },
+     {
+      "r": "0x76e1bd733ec20698d1fb57bf4ac3d01551412d0c69c28c2a33248bdf68973754",
+      "s": "0x2de015b262708a44ba979ce15d59c66c05d448100dbbabe633236b8042069525",
+      "v": 27
+     }
+    ],
+    "payload": {
+     "multiSigUser": "0x1a642f0e3c3af545e7acbd38b07251b3990914f1",
+     "outerSigner": "0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c",
+     "action": {
+      "type": "order",
+      "orders": [
+       {
+        "a": 3,
+        "b": true,
+        "p": "81000",
+        "s": "0.001",
+        "r": false,
+        "t": {
+         "limit": {
+          "tif": "Ioc"
+         }
+        }
+       }
+      ],
+      "grouping": "na"
+     }
+    }
+   },
+   "outer": {
+    "r": "0x18abd5b850d950ab9ac99d2c5435ce0e132b2fb4adbf1ba08f75b4c11eabad12",
+    "s": "0x512e41a97a7b09d67949df09b1587609997bb894039eccc9e2cd2d697d9db793",
+    "v": 28
+   }
+  },
+  "mainnet/cancel": {
+   "hash": "a9aca82a07daeb6b380831b9fdfaca7e1c42b7e10f19cc51d8a04152512bfe1f",
+   "hash_no_expiry": "726d005bb07c78e8f97c755105f7b89450e08569304f9693ada3c7fff24e9b2f",
+   "plain": {
+    "r": "0xe382a1322e82eeee5c6ba39dd392298aeb4e4fcddb2b61cc7984e5ade7901c9b",
+    "s": "0x5bbc75e61e17254dc9e3042c78ba8f3a1ed10757316d18a4c5f08d158697f34f",
+    "v": 27
+   },
+   "cosigned": {
+    "agent": {
+     "r": "0x9af8aaca63d32c5761778a099fa45bf6bdb0b00e1a916bb81f36b2ea0b863238",
+     "s": "0x3ef933dac8b8235f3da6a3953f1f91f87a00b501fc1a2515dee1de2c7a9107dd",
+     "v": 27
+    },
+    "guard": {
+     "r": "0x68f4bb1153fea634cc5ed846fcdb6063c2574266ec7ed876a39a60161d49dc65",
+     "s": "0x4ecfe6876f5aa36cffa98546adfbea90b7c1184bd2114c8df980b720cc645d48",
+     "v": 28
+    }
+   },
+   "multi_sig_action": {
+    "type": "multiSig",
+    "signatureChainId": "0x66eee",
+    "signatures": [
+     {
+      "r": "0x9af8aaca63d32c5761778a099fa45bf6bdb0b00e1a916bb81f36b2ea0b863238",
+      "s": "0x3ef933dac8b8235f3da6a3953f1f91f87a00b501fc1a2515dee1de2c7a9107dd",
+      "v": 27
+     },
+     {
+      "r": "0x68f4bb1153fea634cc5ed846fcdb6063c2574266ec7ed876a39a60161d49dc65",
+      "s": "0x4ecfe6876f5aa36cffa98546adfbea90b7c1184bd2114c8df980b720cc645d48",
+      "v": 28
+     }
+    ],
+    "payload": {
+     "multiSigUser": "0x1a642f0e3c3af545e7acbd38b07251b3990914f1",
+     "outerSigner": "0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c",
+     "action": {
+      "type": "cancel",
+      "cancels": [
+       {
+        "a": 3,
+        "o": 123456
+       }
+      ]
+     }
+    }
+   },
+   "outer": {
+    "r": "0x57ab45ad2814274367bb8a2614a852d21ca89915a37d89742ea994a3196a0485",
+    "s": "0x45280cb833af608394c9e23181240ad5bdbe07441dfcd01972589ffec9c7a36d",
+    "v": 28
+   }
+  },
+  "mainnet/convert": {
+   "action": {
+    "type": "convertToMultiSigUser",
+    "signers": "{\"authorizedUsers\": [\"0x3325a78425F17a7E487Eb5666b2bFd93aBb06c70\", \"0x5050A4F4b3f9338C3472dcC01A87C76A144b3c9c\", \"0xc48B812bB43401392c037381AcA934F4069C0517\"], \"threshold\": 2}",
+    "nonce": 1760000000000,
+    "signatureChainId": "0x66eee",
+    "hyperliquidChain": "Mainnet"
+   },
+   "signature": {
+    "r": "0x9f71c05f3d0d1f3ae7d6498ee2d6f1233407ab4d1a58647b6474e173b311e802",
+    "s": "0x3a373487b32552823a4d4bcfc96ad7d521efee9c63c20799dbe9c90df868f178",
+    "v": 28
+   }
+  },
+  "testnet/order": {
+   "hash": "b406432a87e3397370e6b610e346a691ece5369a5d40daa26a5e425f34d714be",
+   "hash_no_expiry": "f12c2e0b0e6f00a0564113e69309b2e2f53cec6dcda4c965bd00de59bfb13bf6",
+   "plain": {
+    "r": "0x8aa1b97267d50329a185af5f00d231f90a0c6fa8dcce4e76e417af13a93fb04b",
+    "s": "0x15743ac857c7cbd82542b3244d064a5a8125ade9a0ea9243af41b849c376b5ca",
+    "v": 28
+   },
+   "cosigned": {
+    "agent": {
+     "r": "0x36eb7ad0ba56e5f1d045eae97963454dab1435f2f5672378e997e9f99802b3c1",
+     "s": "0x6eeca37207d872f7c4c7d265694ba5e9ed7c1cbad2bca3f6647c20d646c35dd",
+     "v": 27
+    },
+    "guard": {
+     "r": "0x19c884775ed6f66a7128f600f66cfcdc16b05e7558c467535efaf9c0a4d1a3ae",
+     "s": "0x122a5331fbcd13e6dd8bd11ba692fc9434b08ad69df21a3b6c6e19851057005a",
+     "v": 27
+    }
+   },
+   "multi_sig_action": {
+    "type": "multiSig",
+    "signatureChainId": "0x66eee",
+    "signatures": [
+     {
+      "r": "0x36eb7ad0ba56e5f1d045eae97963454dab1435f2f5672378e997e9f99802b3c1",
+      "s": "0x6eeca37207d872f7c4c7d265694ba5e9ed7c1cbad2bca3f6647c20d646c35dd",
+      "v": 27
+     },
+     {
+      "r": "0x19c884775ed6f66a7128f600f66cfcdc16b05e7558c467535efaf9c0a4d1a3ae",
+      "s": "0x122a5331fbcd13e6dd8bd11ba692fc9434b08ad69df21a3b6c6e19851057005a",
+      "v": 27
+     }
+    ],
+    "payload": {
+     "multiSigUser": "0x1a642f0e3c3af545e7acbd38b07251b3990914f1",
+     "outerSigner": "0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c",
+     "action": {
+      "type": "order",
+      "orders": [
+       {
+        "a": 3,
+        "b": true,
+        "p": "81000",
+        "s": "0.001",
+        "r": false,
+        "t": {
+         "limit": {
+          "tif": "Ioc"
+         }
+        }
+       }
+      ],
+      "grouping": "na"
+     }
+    }
+   },
+   "outer": {
+    "r": "0xde68e66e759c4e111c31fa371b481af1c3a9f7ef0a651f9f57efc74d40b46bf8",
+    "s": "0xb85cc55f4334d6f52db78286f0fb2e81bbdd36dd3a21947eef0d193d414dfd3",
+    "v": 27
+   }
+  },
+  "testnet/cancel": {
+   "hash": "a9aca82a07daeb6b380831b9fdfaca7e1c42b7e10f19cc51d8a04152512bfe1f",
+   "hash_no_expiry": "726d005bb07c78e8f97c755105f7b89450e08569304f9693ada3c7fff24e9b2f",
+   "plain": {
+    "r": "0x4151359c2bcc051e0cbb59a6fe0e5dbdd698ed36001eaf42b6a4a8794e35e3e5",
+    "s": "0x73e775c478d5e2ec422267fab2e1d4864e60d82d270f8b7c61dac32485ca36d7",
+    "v": 28
+   },
+   "cosigned": {
+    "agent": {
+     "r": "0xf260941baa42ae09865ad3861563f7b343075ea688ed79dfd6b7292ec39b260a",
+     "s": "0x2c9fb78e4f9071df5e58487ad548ffa409ed6bfd62ef26fc124d1f94cad01cb5",
+     "v": 27
+    },
+    "guard": {
+     "r": "0xabc032e95660459d70ef9073cffe674d4a06ee85ba5d53c703e7cfa1b5ef8b8e",
+     "s": "0x6f1f18a029ec7cc87cadf6552b8f171d1ee686ab2b1ab4edcd8dc4ed47412c59",
+     "v": 27
+    }
+   },
+   "multi_sig_action": {
+    "type": "multiSig",
+    "signatureChainId": "0x66eee",
+    "signatures": [
+     {
+      "r": "0xf260941baa42ae09865ad3861563f7b343075ea688ed79dfd6b7292ec39b260a",
+      "s": "0x2c9fb78e4f9071df5e58487ad548ffa409ed6bfd62ef26fc124d1f94cad01cb5",
+      "v": 27
+     },
+     {
+      "r": "0xabc032e95660459d70ef9073cffe674d4a06ee85ba5d53c703e7cfa1b5ef8b8e",
+      "s": "0x6f1f18a029ec7cc87cadf6552b8f171d1ee686ab2b1ab4edcd8dc4ed47412c59",
+      "v": 27
+     }
+    ],
+    "payload": {
+     "multiSigUser": "0x1a642f0e3c3af545e7acbd38b07251b3990914f1",
+     "outerSigner": "0x5050a4f4b3f9338c3472dcc01a87c76a144b3c9c",
+     "action": {
+      "type": "cancel",
+      "cancels": [
+       {
+        "a": 3,
+        "o": 123456
+       }
+      ]
+     }
+    }
+   },
+   "outer": {
+    "r": "0x8c799782c3db6ed6fc8a545649c288e641b11a952b1d704769e47f5e12106fc1",
+    "s": "0x52998f9ebf4a9ec338d296e33cc16a09a55399563b4bfbbde68b25c01ae5721c",
+    "v": 28
+   }
+  },
+  "testnet/convert": {
+   "action": {
+    "type": "convertToMultiSigUser",
+    "signers": "{\"authorizedUsers\": [\"0x3325a78425F17a7E487Eb5666b2bFd93aBb06c70\", \"0x5050A4F4b3f9338C3472dcC01A87C76A144b3c9c\", \"0xc48B812bB43401392c037381AcA934F4069C0517\"], \"threshold\": 2}",
+    "nonce": 1760000000000,
+    "signatureChainId": "0x66eee",
+    "hyperliquidChain": "Testnet"
+   },
+   "signature": {
+    "r": "0x3c27872c09e0b423c8ee71cbf6473b9c8a350234b97557fac061b7b41458128",
+    "s": "0x3337be3b6e9099de06dd650cafbf2d7d4af051afdd75b28c28e90d580ff8d757",
+    "v": 27
+   }
+  },
+  "mainnet/withdraw": {
+   "action": {
+    "type": "withdraw3",
+    "signatureChainId": "0x66eee",
+    "hyperliquidChain": "Mainnet",
+    "destination": "0xc48b812bb43401392c037381aca934f4069c0517",
+    "amount": "25.5",
+    "time": 1760000000000
+   },
+   "signatures": {
+    "owner": {
+     "r": "0xb5d0564fc3c7740362d4bf700c6bb87b79058741f07214a8a8760ae85e5849fc",
+     "s": "0x4e5552602b858c8386092e550e6a59fe6faf87b549c1aec50f68101e594a252e",
+     "v": 28
+    },
+    "guard": {
+     "r": "0x999b17ba86e173fa20cbed8cf7fbf6b9cceafaf098a8adfdb5b4a78fcb71ae11",
+     "s": "0x82f72b142d61a1ff91b047ac29a017ea1c706d595fa0ce9f059db56c66eb1de",
+     "v": 27
+    }
+   }
+  },
+  "mainnet/to_normal": {
+   "action": {
+    "type": "convertToMultiSigUser",
+    "signatureChainId": "0x66eee",
+    "hyperliquidChain": "Mainnet",
+    "signers": "null",
+    "nonce": 1760000000000
+   },
+   "signatures": {
+    "owner": {
+     "r": "0x95f228b6d92e938d904b918fbc43ff3078e63b0ebb9513b5fbf411e6f8966685",
+     "s": "0x3b4db37625279ce3f3abd0bd050fb66316a5a1704c145000dcfa07e5fbd79dff",
+     "v": 28
+    },
+    "guard": {
+     "r": "0x9e8644dcdbd4aeaf05799d1560518f2c46a5a9c1c30d4081b074a6143b0b56d2",
+     "s": "0x3b07502fe1de0fe3065cf439e8b1f707526f88b6f40aaddca68f48c68ca43b3a",
+     "v": 28
+    }
+   }
+  },
+  "testnet/withdraw": {
+   "action": {
+    "type": "withdraw3",
+    "signatureChainId": "0x66eee",
+    "hyperliquidChain": "Testnet",
+    "destination": "0xc48b812bb43401392c037381aca934f4069c0517",
+    "amount": "25.5",
+    "time": 1760000000000
+   },
+   "signatures": {
+    "owner": {
+     "r": "0x56e231bf124373f31c379216e3e244c84aebfcbc46bc0d78f7ab55a5a207dcae",
+     "s": "0x7588b812973972dfff79a8c9b5aecf7f46db716f7ac53879aa2af1157c4a10f8",
+     "v": 27
+    },
+    "guard": {
+     "r": "0x60e7a6a83e1377f1c271ef919b2ea9f59b7baeee97f102b34e7d233f4f1bb027",
+     "s": "0x62c1cddfa64cd81abfc763c86a2f8bdcf04c41fb935d9a0315cc5bad93dd252c",
+     "v": 27
+    }
+   }
+  },
+  "testnet/to_normal": {
+   "action": {
+    "type": "convertToMultiSigUser",
+    "signatureChainId": "0x66eee",
+    "hyperliquidChain": "Testnet",
+    "signers": "null",
+    "nonce": 1760000000000
+   },
+   "signatures": {
+    "owner": {
+     "r": "0xc7f7af14901f50b5f8568fe310c235b3fa3fc5a193f14d2476ed9eb8e354dff6",
+     "s": "0xccbcb0190a808f180fab67878f970e0e7e3ff981ab3d6c805e9ce11d5299e08",
+     "v": 28
+    },
+    "guard": {
+     "r": "0x83dde2e548032d923861fda84ed4212efbe419ba5b21d7681769eb58d0766f57",
+     "s": "0x24b67e3c78d90119ce1095b0eb790df284f4f4c89297471b7c62fae2e00ade56",
+     "v": 27
+    }
+   }
+  }
+ }
+}
