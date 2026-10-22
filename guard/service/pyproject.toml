@@ -19,4 +19,4 @@ hosted = ["google-cloud-firestore>=2.16"]
 hyperion-guard = "hyperion_guard.cli:main"
 
 [tool.setuptools]
-packages = ["hyperion_guard", "hyperion_guard.solana", "hyperion_guard.hyperliquid"]
+packages = ["hyperion_guard", "hyperion_guard.solana", "hyperion_guard.hyperliquid", "hyperion_guard.payments"]

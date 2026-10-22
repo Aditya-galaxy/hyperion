@@ -161,6 +161,42 @@ Guard, and is refused for an order over the cap, for a withdrawal, and for
 going around the Guard. It then kills the agent, closes the position, and
 gives the account back.
 
+## Payouts from a custodial wallet
+
+Some agents pay from a wallet nothing else can sign for, such as a Circle
+agent wallet. For those the Guard is a second key on the *decision*. Before
+each payout the agent's payer asks `/v1/payments/check`, and sends only with
+the approval: an EIP-712 signature over exactly that payout (payer,
+recipient, token, chain, amount, intent id), good for at most five minutes.
+
+The approval is checked against the owner's signed limits:
+
+- a kill switch;
+- the wallets, chains and tokens the owner listed;
+- a cap per payment;
+- a 24-hour cap overall, and one per recipient. These are shared by every
+  instance of the agent.
+
+One intent id is one payout. A retry gets the same approval and counts once.
+
+The enforcement is in the payer's code, so whoever holds the wallet's own
+credentials can still go around it. What the Guard adds is a kill switch and
+limits held outside the agent's deployment, and a signed record of every
+payout it allowed. [MerlinClips](https://github.com/Aditya-galaxy/merlinclips)
+pays its creators this way (`src/campaign/hyperion.ts`). The encoding is
+pinned by [`payments_vector.json`](service/tests/fixtures/payments_vector.json),
+which both sides test against.
+
+The owner's controls:
+
+```bash
+python -m hyperion_guard.payments.owner new-key ~/.hyperion/owner.key
+python -m hyperion_guard.payments.owner policy --key-file ~/.hyperion/owner.key --agent 0x… \
+    --payers 0x… --chains base --tokens 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 \
+    --max-per-payment 50 --daily-cap 250 --max-per-recipient-daily 100
+python -m hyperion_guard.payments.owner kill --key-file ~/.hyperion/owner.key --agent 0x…
+```
+
 ## Try it in one command
 
 With [Foundry](https://getfoundry.sh) and Python 3.11+:

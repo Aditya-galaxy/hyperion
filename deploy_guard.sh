@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Host the Hyperion Guard API (the Solana and Hyperliquid Guards) on Cloud Run.
+# Host the Hyperion Guard API (the Solana, Hyperliquid and payments Guards) on Cloud Run.
 #
 # What this sets up, all in one project:
 #   - a service account for the Guard, allowed to read and write Firestore and
@@ -12,6 +12,8 @@ set -euo pipefail
 #   - the Hyperliquid co-signing key, a secp256k1 private key, in a second
 #     secret, made and kept the same way. Every multi-sig account that names
 #     this Guard as a signer depends on it;
+#   - the payments Guard's approval key, likewise. Every payer that pinned its
+#     address depends on it;
 #   - the service itself, public, one instance at most, kept warm by default
 #     (GUARD_MIN_INSTANCES=0 to scale to zero). The Guard keeps a copy
 #     of its state in memory and must not run as two instances.
@@ -31,6 +33,7 @@ REGION="${GUARD_REGION:-us-central1}"
 SERVICE="${GUARD_SERVICE:-hyperion-guard}"
 SECRET="${GUARD_SECRET:-hyperion-guard-solana-cosigner}"
 HL_SECRET="${GUARD_HYPERLIQUID_SECRET:-hyperion-guard-hyperliquid-cosigner}"
+PAY_SECRET="${GUARD_PAYMENTS_SECRET:-hyperion-guard-payments-cosigner}"
 SA_NAME="${GUARD_SERVICE_ACCOUNT:-hyperion-guard}"
 SOLANA_RPC_URL="${GUARD_SOLANA_RPC_URL:-https://api.devnet.solana.com}"
 VAULT_PROGRAM_ID="${GUARD_VAULT_PROGRAM_ID:-9btLSADcT2u3M1HnC4cdkV4HiN662bqmhHYvevaSragq}"
@@ -69,7 +72,7 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" --member "serviceAccount:${
 
 # 32 random bytes serve as either key: an Ed25519 seed, or a secp256k1 private key
 # (below the curve order with overwhelming probability).
-for secret in "$SECRET" "$HL_SECRET"; do
+for secret in "$SECRET" "$HL_SECRET" "$PAY_SECRET"; do
     if ! gcloud secrets describe "$secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
         echo "[+] Generating a co-signing key into secret ${secret} (not shown)"
         python3 -c "import os, sys; sys.stdout.write(os.urandom(32).hex())" \
@@ -87,7 +90,7 @@ gcloud run deploy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" \
     --service-account "$SA" \
     --allow-unauthenticated \
     --min-instances "$MIN_INSTANCES" --max-instances 1 --concurrency 20 --memory 512Mi --cpu 1 --timeout 30 \
-    --set-secrets "HYPERION_SOLANA_COSIGNER_KEY=${SECRET}:latest,HYPERION_HYPERLIQUID_COSIGNER_KEY=${HL_SECRET}:latest" \
+    --set-secrets "HYPERION_SOLANA_COSIGNER_KEY=${SECRET}:latest,HYPERION_HYPERLIQUID_COSIGNER_KEY=${HL_SECRET}:latest,HYPERION_PAYMENTS_COSIGNER_KEY=${PAY_SECRET}:latest" \
     --set-env-vars "HYPERION_SOLANA_STATE=firestore,HYPERION_SOLANA_PRICES=jupiter,HYPERION_SOLANA_RPC_URL=${SOLANA_RPC_URL},HYPERION_VAULT_PROGRAM_ID=${VAULT_PROGRAM_ID},HYPERION_SOLANA_MAX_AGENTS=${MAX_AGENTS},HYPERION_RATE_LIMIT=${RATE_LIMIT},HYPERION_RATE_LIMIT_WRITES=${RATE_LIMIT_WRITES},HYPERION_RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL},HYPERION_TRUSTED_PROXIES=1" \
     --quiet
 
@@ -96,3 +99,4 @@ echo
 echo "[+] Live at ${URL}"
 curl -fsS "${URL}/v1/solana/health" && echo
 curl -fsS "${URL}/v1/hyperliquid/health" && echo
+curl -fsS "${URL}/v1/payments/health" | python3 -c "import json, sys; print({'payments_cosigner': json.load(sys.stdin)['cosigner_address']})"
