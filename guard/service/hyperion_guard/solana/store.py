@@ -38,7 +38,8 @@ from pathlib import Path
 from typing import Any, Protocol
 
 KINDS = ("policy", "nonce", "usage", "approved",
-         "hl_policy", "hl_nonce", "hl_usage", "hl_approved")          # the Hyperliquid Guard's: see hyperliquid/guard.py
+         "hl_policy", "hl_nonce", "hl_usage", "hl_approved",          # the Hyperliquid Guard's: see hyperliquid/guard.py
+         "pay_policy", "pay_nonce", "pay_usage", "pay_approved")      # the payments Guard's: see payments/guard.py
 
 
 class StateStore(Protocol):

@@ -5,6 +5,7 @@ HYPERION GUARD: HTTP API
     POST /v1/check                   one order → one signed verdict (paid, via the proxy)
     /v1/solana/*                     the co-signer for a Solana Guarded Vault
     /v1/hyperliquid/*                the co-signer for a Hyperliquid multi-sig account
+    /v1/payments/*                   approvals for an agent's payouts from a custodial wallet
     GET  /v1/agents/{address}        the agent's policy and kill state, read from Arc
     GET  /v1/verdicts?agent=0x…      recent verdicts
     GET  /v1/verdicts/{seq}          one verdict, with its Merkle proof once anchored
@@ -32,6 +33,8 @@ from .engine import ExecutorCall, Guard, GuardUnavailable, parse_order
 from .hyperliquid import control as hl_control
 from .hyperliquid.guard import HyperliquidGuardEngine, HyperliquidPolicy, Refused
 from .hyperliquid.market import HyperliquidMarket, MarketUnavailable
+from .payments import control as pay_control
+from .payments.guard import CHAINS, PaymentGuardEngine, PaymentPolicy, amount_units
 from .ratelimit import Limits
 from .solana import SolanaAgentPolicy, SolanaGuardEngine, b58decode
 from .solana.control import action_message, policy_message
@@ -52,7 +55,8 @@ def _address(value: str, name: str) -> str:
 
 
 def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | None = None,
-               limits: Limits | None = None, hyperliquid_guard: HyperliquidGuardEngine | None = None) -> FastAPI:
+               limits: Limits | None = None, hyperliquid_guard: HyperliquidGuardEngine | None = None,
+               payments_guard: PaymentGuardEngine | None = None) -> FastAPI:
     app = FastAPI(title="Hyperion Guard", version="1",
                   description="Pre-trade risk checks for autonomous trading agents, with multi-chain protection (Arc EVM + Solana).")
 
@@ -101,10 +105,17 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         key = os.environ.get("HYPERION_HYPERLIQUID_COSIGNER_KEY", "").strip()
         hyperliquid_guard = HyperliquidGuardEngine(HyperliquidMarket(), cosigner_key=key or None, store=solana_guard.store)
     app.state.hyperliquid_guard = hyperliquid_guard
+    if payments_guard is None:
+        # Its approval key, a secp256k1 private key in hex. Without it a key is made up at start-up,
+        # and every payer that pinned the old address refuses to pay until it's told the new one.
+        key = os.environ.get("HYPERION_PAYMENTS_COSIGNER_KEY", "").strip()
+        payments_guard = PaymentGuardEngine(cosigner_key=key or None, store=solana_guard.store)
+    app.state.payments_guard = payments_guard
 
     @app.get("/v1/health")
     def health():
-        res = {"ok": True, "solana_cosigner": solana_guard.pubkey_b58, "hyperliquid_cosigner": hyperliquid_guard.address}
+        res = {"ok": True, "solana_cosigner": solana_guard.pubkey_b58, "hyperliquid_cosigner": hyperliquid_guard.address,
+               "payments_cosigner": payments_guard.address}
         if guard:
             res.update({
                 "signer": signer,
@@ -505,5 +516,105 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         return {"approved": v.approved, "status": v.status, "violation_details": v.violation_details,
                 "account": v.account, "operations": v.operations, "cosigner_address": v.cosigner_address,
                 "cosigner_signature": v.cosigner_signature}
+
+    # =========================================================================
+    # Payments Endpoints
+    # =========================================================================
+    pay = payments_guard
+
+    def _pay_policy_json(p: PaymentPolicy) -> dict:
+        return {**{k: v for k, v in p.__dict__.items() if k != "is_killed"}, "killed": p.is_killed}
+
+    @app.get("/v1/payments/health")
+    def payments_health():
+        return {"ok": True, "cosigner_address": pay.address, "approval_domain": pay_control.APPROVAL_DOMAIN,
+                "approval_types": pay_control.APPROVAL_TYPES, "max_ttl_s": 300}
+
+    @app.post("/v1/payments/policy")
+    def set_payments_policy(body: Annotated[dict, Body()]):
+        agent = _address(body.get("agent"), "agent").lower()
+        owner = _address(body.get("owner"), "owner").lower()
+        guardian = _address(body["guardian"], "guardian").lower() if body.get("guardian") else ""
+        if owner == agent:
+            raise HTTPException(422, "the owner and the agent must be different keys")
+        lists = {}
+        for name in ("payers", "chains", "tokens"):
+            value = body.get(name)
+            if not isinstance(value, list) or not value or not all(isinstance(x, str) for x in value):
+                raise HTTPException(422, f"{name} must be a non-empty list")
+            lists[name] = value
+        payers = sorted(_address(p, "payer").lower() for p in lists["payers"])
+        tokens = sorted(_address(t, "token").lower() for t in lists["tokens"])
+        chains = sorted(set(lists["chains"]))
+        if not set(chains) <= CHAINS:
+            raise HTTPException(422, f"chains must be among {sorted(CHAINS)}")
+        caps = {}
+        for name in ("max_per_payment_usdc", "daily_cap_usdc", "max_per_recipient_daily_usdc"):
+            try:
+                caps[name] = pay_control.usd(body.get(name))
+                amount_units(caps[name])
+            except Exception:  # noqa: BLE001
+                raise HTTPException(422, f"{name} must be a dollar amount above zero") from None
+        version, nonce = _int(body, "policy_version", 1), _int(body, "nonce", 0)
+        message = pay_control.policy_message(agent=agent, owner=owner, guardian=guardian, payers=payers, chains=chains,
+                                             tokens=tokens, policy_version=version, nonce=nonce, **caps)
+        if pay_control.signer_of(message, str(body.get("signature", ""))) != owner:
+            raise HTTPException(401, "signature must be the owner's over the policy message")
+        existing = pay.get_policy(agent)
+        if existing is not None:
+            if existing.owner != owner:
+                raise HTTPException(403, "only the agent's registered owner can change its policy")
+            if version <= existing.policy_version:
+                raise HTTPException(409, f"policy_version must be above {existing.policy_version}")
+        elif len(pay.policies) >= max_agents:
+            raise HTTPException(507, f"this Guard holds its limit of {max_agents} agents")
+        policy = PaymentPolicy(agent=agent, owner=owner, guardian=guardian, payers=payers, chains=chains, tokens=tokens,
+                               policy_version=version, is_killed=existing.is_killed if existing else False, **caps)
+        if not pay.set_policy(policy, nonce):
+            raise HTTPException(409, "nonce already used: sign a new message with a higher nonce")
+        return {"ok": True, "policy": _pay_policy_json(policy)}
+
+    @app.get("/v1/payments/policy/{agent}")
+    def get_payments_policy(agent: str):
+        policy = pay.get_policy(_address(agent, "agent"))
+        if policy is None:
+            raise HTTPException(404, f"no policy for {agent}")
+        return _pay_policy_json(policy)
+
+    def _pay_control(action: str, body: dict) -> PaymentPolicy:
+        agent = _address(body.get("agent"), "agent").lower()
+        policy = pay.get_policy(agent)
+        if policy is None:
+            raise HTTPException(404, f"no policy for {agent}")
+        nonce = _int(body, "nonce")
+        caller = pay_control.signer_of(pay_control.action_message(action, agent, nonce), str(body.get("signature", "")))
+        allowed = {policy.owner} | ({policy.guardian} if policy.guardian and action == "kill" else set())
+        if caller not in allowed:
+            raise HTTPException(403, f"{action} must be signed by the owner{' or the guardian' if action == 'kill' else ''}")
+        if not pay.set_killed(agent, action == "kill", nonce):
+            raise HTTPException(409, "nonce already used: an old message can't be replayed")
+        return policy
+
+    @app.post("/v1/payments/kill")
+    def kill_payments(body: Annotated[dict, Body()]):
+        return {"ok": True, "agent": _pay_control("kill", body).agent, "killed": True}
+
+    @app.post("/v1/payments/revive")
+    def revive_payments(body: Annotated[dict, Body()]):
+        return {"ok": True, "agent": _pay_control("revive", body).agent, "killed": False}
+
+    @app.post("/v1/payments/check")
+    def payments_check(body: Annotated[dict, Body()]):
+        fields = {name: _address(body.get(name), name) for name in ("agent", "payer", "recipient", "token")}
+        chain, amount, intent_id = body.get("chain"), body.get("amount"), body.get("intent_id")
+        if not isinstance(chain, str) or not isinstance(amount, str) or not isinstance(intent_id, str):
+            raise HTTPException(422, "chain, amount (a decimal string) and intent_id are required")
+        simulate = body.get("simulate", False)
+        if not isinstance(simulate, bool):
+            raise HTTPException(422, "simulate must be true or false")
+        v = pay.check(**fields, chain=chain, amount=amount, intent_id=intent_id, expires_at=_int(body, "expires_at"),
+                      simulate=simulate, signature=str(body.get("signature", "")))
+        return {"approved": v.approved, "status": v.status, "violation_details": v.violation_details, "agent": v.agent,
+                "approval": v.approval, "signature": v.signature, "cosigner_address": v.cosigner_address}
 
     return app
