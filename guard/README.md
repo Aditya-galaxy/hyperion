@@ -100,6 +100,67 @@ The Solana Guard is written for one running instance: it keeps a copy of its
 state in memory, and two instances sharing a store would let more through
 than the caps allow. It answers one request at a time.
 
+## Also on Hyperliquid
+
+On Hyperliquid there is nothing to deploy. A Hyperliquid account can be made a
+**native multi-sig**, which Hyperliquid itself enforces. The agent trades from
+an account whose authorized users are the owner, the agent and the Guard, any
+two of three:
+
+| Who signs | What they can do |
+|---|---|
+| the agent alone | nothing |
+| the agent and the Guard | trade, within the owner's policy |
+| the owner and either | anything, including withdraw and undo the multi-sig |
+
+**The Hyperliquid Guard** ([service/hyperion_guard/hyperliquid](service/hyperion_guard/hyperliquid/guard.py))
+co-signs for the agent only:
+
+- **orders and modifies**, on perps only. Each order is sized at the mid
+  price against a cap per order and a cap per day. Its limit price must sit
+  within a collar of the mid, and its market must be on the owner's list.
+- **leverage changes**, up to the owner's maximum;
+- **cancels**, always.
+
+It never co-signs a withdrawal, a transfer, a change of signers, or an agent
+or builder approval for the agent. It refuses an order that carries a builder
+fee, and any field it doesn't expect. After a kill, the agent may only cancel
+and place reduce-only orders: it can close positions, never open them.
+
+Two details matter:
+
+- **Every action it signs must expire within two minutes.** It checks
+  Hyperliquid's `expiresAfter`, which is part of what's signed. Hyperliquid
+  accepts nonces up to two days old, so without this an approval given before
+  a kill could be held back and used after it.
+- **A policy can't be registered for a badly set-up account.** The Guard reads
+  the account's signers from Hyperliquid first. It refuses unless they are
+  exactly the owner, the agent and this Guard, two of three, with the owner
+  not the agent. Otherwise a stolen agent key could register a looser policy
+  under a fresh "owner" key.
+
+The signing ([`hyperliquid/signing.py`](service/hyperion_guard/hyperliquid/signing.py))
+is tested byte for byte against vectors from Hyperliquid's own Python SDK
+([`make_hyperliquid_vectors.py`](service/tests/fixtures/make_hyperliquid_vectors.py)).
+
+| Endpoint | |
+|---|---|
+| `GET /v1/hyperliquid/health` | The Guard's co-signing address: make it one of the account's signers |
+| `POST /v1/hyperliquid/policy` | The owner sets the policy, with an EIP-191 signature over every field |
+| `GET /v1/hyperliquid/policy/{account}` | The policy and kill state |
+| `POST /v1/hyperliquid/kill`, `/revive` | The owner or guardian kills; only the owner revives |
+| `POST /v1/hyperliquid/check` | The agent (or owner) sends the action, nonce, expiry and its own signature; an approval carries the Guard's |
+
+`HYPERION_HYPERLIQUID_COSIGNER_KEY` is the Guard's secp256k1 key in hex. State
+goes in the same store as the Solana Guard's.
+
+**Live demo:** `HL_ACCOUNT_KEY=0x… python guard/demo/hyperliquid_testnet.py`
+runs eight scenes on Hyperliquid testnet. You need a testnet account with
+about $25 of USDC. The demo makes the account a multi-sig, trades through the
+Guard, and is refused for an order over the cap, for a withdrawal, and for
+going around the Guard. It then kills the agent, closes the position, and
+gives the account back.
+
 ## Try it in one command
 
 With [Foundry](https://getfoundry.sh) and Python 3.11+:
