@@ -11,8 +11,9 @@ It works with `@solana/web3.js` 1.x: instructions are ordinary
 ```bash
 cd guard/client-ts
 npm install
-npm test          # 14 tests
-npm run demo      # six scenes on devnet, against the hosted Guard
+npm test                 # 21 tests
+npm run demo             # six scenes on devnet, against the hosted Guard
+npm run demo:agent-kit   # a Solana Agent Kit agent paying from its vault, on devnet
 ```
 
 ## An agent's payment
@@ -52,6 +53,45 @@ tx.add(executeIx(PROGRAM, vault, agent.publicKey, guardKey, swapInstruction));
 The Guard judges the inner call: its size, its slippage, and whether its
 program is allowed.
 
+## In a Solana Agent Kit agent
+
+`hyperion-guard-client/agent-kit` is a plugin for
+[Solana Agent Kit](https://github.com/sendaifun/solana-agent-kit) 2.x. The
+kit's wallet is the agent's own key, holding only fee money. The agent's
+working money sits in its vault, and the plugin is how the agent spends it:
+it builds the vault instruction, signs with the kit's wallet, asks the Guard,
+and sends only if the Guard co-signs.
+
+```ts
+import { KeypairWallet, SolanaAgentKit, createVercelAITools } from "solana-agent-kit";
+import { HyperionGuardPlugin } from "hyperion-guard-client/agent-kit";
+
+const agent = new SolanaAgentKit(new KeypairWallet(agentKey, rpc), rpc, {})
+  .use(HyperionGuardPlugin({ guardUrl, programId, owner, agentId: "agent-1" }));
+
+await agent.methods.guardedTransferSol(agent, merchant, 0.02);   // throws GuardRefused if the Guard says no
+await agent.methods.guardedExecute(agent, [swapInstruction]);    // the vault makes the call
+const tools = createVercelAITools(agent, agent.actions);         // or createLangchainTools, createOpenAITools
+```
+
+It gives a model two actions:
+
+| | |
+|---|---|
+| `HYPERION_GUARDED_TRANSFER_SOL` | Pay SOL from the vault. A refusal comes back as `{ status: "refused", guardStatus, reason }`, so the model learns why and nothing is sent |
+| `HYPERION_GUARD_VAULT_INFO` | The vault's balance, whether it's killed, and its on-chain cap per payment |
+
+The plugin imports only the kit's types, so it uses whichever copy of
+`solana-agent-kit` your agent has. `solana-agent-kit` and `zod` are optional
+peer dependencies; the rest of this package doesn't need them.
+
+`examples/agent-kit.ts` runs it on devnet. A model's two calls look like this:
+
+```
+HYPERION_GUARDED_TRANSFER_SOL { amountSol: 0.02 }  → success, co-signed and sent
+HYPERION_GUARDED_TRANSFER_SOL { amountSol: 0.04 }  → refused: Order notional $4.15 exceeds cap of $3.46
+```
+
 ## What's here
 
 | | |
@@ -62,6 +102,8 @@ program is allowed.
 | `killIx`, `reviveIx`, `withdrawIx` | The guardian's and the owner's controls |
 | `GuardClient` | `cosignerKey`, `setPolicy`, `check`, `checkAndCosign`, `kill`, `revive` |
 | `policyMessage`, `actionMessage` | The exact bytes an owner or guardian signs |
+| `decodeVault` | A vault account's state: killed or not, its keys, its cap |
+| `HyperionGuardPlugin` | The Solana Agent Kit plugin, from `hyperion-guard-client/agent-kit` |
 
 `setPolicy`, `kill` and `revive` take a function that signs a message, so the
 owner's key can live wherever you keep it:
