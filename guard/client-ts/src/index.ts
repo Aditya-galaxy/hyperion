@@ -150,6 +150,38 @@ export function withdrawIx(programId: PublicKey, owner: PublicKey, vault: Public
   });
 }
 
+/** A vault account, as guard/contracts_solana/src/state.rs lays it out. */
+export interface VaultState {
+  killed: boolean;
+  owner: PublicKey;
+  /** Null if the vault has none. */
+  guardian: PublicKey | null;
+  agent: PublicKey;
+  guard: PublicKey;
+  maxLamportsPerTx: bigint;
+  /** How many agent actions have gone through. */
+  executions: bigint;
+  allowedPrograms: PublicKey[];
+}
+
+/** Read a vault account's data. Null if it isn't an initialized vault. */
+export function decodeVault(data: Uint8Array): VaultState | null {
+  if (data.length < 148 + 32 * MAX_PROGRAMS || data[0] !== 1 || data[147]! > MAX_PROGRAMS) return null;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const key = (at: number) => new PublicKey(data.subarray(at, at + 32));
+  const guardian = data.subarray(35, 67).every((b) => b === 0) ? null : key(35);
+  return {
+    killed: data[1] !== 0,
+    owner: key(3),
+    guardian,
+    agent: key(67),
+    guard: key(99),
+    maxLamportsPerTx: view.getBigUint64(131, true),
+    executions: view.getBigUint64(139, true),
+    allowedPrograms: Array.from({ length: data[147]! }, (_, i) => key(148 + 32 * i)),
+  };
+}
+
 // ── what an owner or guardian signs ─────────────────────────────────────────
 
 export interface GuardPolicy {

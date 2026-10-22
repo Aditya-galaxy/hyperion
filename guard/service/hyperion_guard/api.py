@@ -3,6 +3,8 @@ HYPERION GUARD: HTTP API
 ========================
     GET  /v1/health                  signer, contract, chain
     POST /v1/check                   one order → one signed verdict (paid, via the proxy)
+    /v1/solana/*                     the co-signer for a Solana Guarded Vault
+    /v1/hyperliquid/*                the co-signer for a Hyperliquid multi-sig account
     GET  /v1/agents/{address}        the agent's policy and kill state, read from Arc
     GET  /v1/verdicts?agent=0x…      recent verdicts
     GET  /v1/verdicts/{seq}          one verdict, with its Merkle proof once anchored
@@ -27,6 +29,9 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .engine import ExecutorCall, Guard, GuardUnavailable, parse_order
+from .hyperliquid import control as hl_control
+from .hyperliquid.guard import HyperliquidGuardEngine, HyperliquidPolicy, Refused
+from .hyperliquid.market import HyperliquidMarket, MarketUnavailable
 from .ratelimit import Limits
 from .solana import SolanaAgentPolicy, SolanaGuardEngine, b58decode
 from .solana.control import action_message, policy_message
@@ -47,7 +52,7 @@ def _address(value: str, name: str) -> str:
 
 
 def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | None = None,
-               limits: Limits | None = None) -> FastAPI:
+               limits: Limits | None = None, hyperliquid_guard: HyperliquidGuardEngine | None = None) -> FastAPI:
     app = FastAPI(title="Hyperion Guard", version="1",
                   description="Pre-trade risk checks for autonomous trading agents, with multi-chain protection (Arc EVM + Solana).")
 
@@ -90,10 +95,16 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
     # A public Guard shouldn't let strangers fill its store with policies.
     max_agents = int(os.environ.get("HYPERION_SOLANA_MAX_AGENTS", "1000"))
     app.state.solana_guard = solana_guard
+    if hyperliquid_guard is None:
+        # The co-signing key: a secp256k1 private key in hex. Without it a key is made up at
+        # start-up, and every account that named the old one can't trade until its owner changes signers.
+        key = os.environ.get("HYPERION_HYPERLIQUID_COSIGNER_KEY", "").strip()
+        hyperliquid_guard = HyperliquidGuardEngine(HyperliquidMarket(), cosigner_key=key or None, store=solana_guard.store)
+    app.state.hyperliquid_guard = hyperliquid_guard
 
     @app.get("/v1/health")
     def health():
-        res = {"ok": True, "solana_cosigner": solana_guard.pubkey_b58}
+        res = {"ok": True, "solana_cosigner": solana_guard.pubkey_b58, "hyperliquid_cosigner": hyperliquid_guard.address}
         if guard:
             res.update({
                 "signer": signer,
@@ -375,5 +386,124 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
             "cosigner_pubkey": verdict.cosigner_pubkey,
             "cosigner_signature_b58": verdict.cosigner_signature_b58,
         }
+
+    # =========================================================================
+    # Hyperliquid Endpoints
+    # =========================================================================
+    hl = hyperliquid_guard
+
+    def _hl_policy_json(p: HyperliquidPolicy) -> dict:
+        return {"account": p.account, "network": p.network, "agent": p.agent, "owner": p.owner, "guardian": p.guardian,
+                "max_order_notional_usd": p.max_order_notional_usd, "daily_notional_cap_usd": p.daily_notional_cap_usd,
+                "max_slippage_bps": p.max_slippage_bps, "max_leverage": p.max_leverage, "allowed_coins": p.allowed_coins,
+                "policy_version": p.policy_version, "killed": p.is_killed}
+
+    def _int(body: dict, name: str, default: int | None = None) -> int:
+        value = body.get(name, default)
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise HTTPException(422, f"{name} must be an integer")
+        return value
+
+    @app.get("/v1/hyperliquid/health")
+    def hyperliquid_health():
+        return {"ok": True, "cosigner_address": hl.address, "max_expiry_ms": 120_000}
+
+    @app.post("/v1/hyperliquid/policy")
+    def set_hyperliquid_policy(body: Annotated[dict, Body()]):
+        network = body.get("network")
+        if network not in ("mainnet", "testnet"):
+            raise HTTPException(422, 'network must be "mainnet" or "testnet"')
+        account = _address(body.get("account"), "account").lower()
+        agent = _address(body.get("agent"), "agent").lower()
+        owner = _address(body.get("owner"), "owner").lower()
+        guardian = body.get("guardian") or ""
+        if guardian:
+            guardian = _address(guardian, "guardian").lower()
+        coins = body.get("allowed_coins")
+        if coins is not None and (not isinstance(coins, list) or not all(isinstance(c, str) and c for c in coins)):
+            raise HTTPException(422, "allowed_coins must be a list of coin names, or omitted for any listed perp")
+        try:
+            cap = float(body.get("max_order_notional_usd", 1_000.0))
+            daily = float(body.get("daily_notional_cap_usd", 10_000.0))
+        except (TypeError, ValueError):
+            raise HTTPException(422, "the caps must be numbers") from None
+        if not (math.isfinite(cap) and math.isfinite(daily) and cap > 0 and daily >= cap):
+            raise HTTPException(422, "max_order_notional_usd must be above zero, and the daily cap at least that")
+        slippage, leverage = _int(body, "max_slippage_bps", 100), _int(body, "max_leverage", 3)
+        version, nonce = _int(body, "policy_version", 1), _int(body, "nonce", 0)
+        if not 1 <= slippage <= 1_000 or not 1 <= leverage <= 50:
+            raise HTTPException(422, "max_slippage_bps must be 1–1000 and max_leverage 1–50")
+
+        message = hl_control.policy_message(
+            network=network, account=account, agent=agent, owner=owner, guardian=guardian, max_order_notional_usd=cap,
+            daily_notional_cap_usd=daily, max_slippage_bps=slippage, max_leverage=leverage, allowed_coins=coins,
+            policy_version=version, nonce=nonce)
+        if hl_control.signer_of(message, str(body.get("signature", ""))) != owner:
+            raise HTTPException(401, "signature must be the owner's over the policy message")
+
+        existing = hl.get_policy(account)
+        if existing is not None:
+            if existing.owner != owner:
+                raise HTTPException(403, "only the account's registered owner can change its policy")
+            if version <= existing.policy_version:
+                raise HTTPException(409, f"policy_version must be above {existing.policy_version}")
+        elif len(hl.policies) >= max_agents:
+            raise HTTPException(507, f"this Guard holds its limit of {max_agents} accounts")
+        policy = HyperliquidPolicy(account=account, network=network, agent=agent, owner=owner, guardian=guardian,
+                                   max_order_notional_usd=cap, daily_notional_cap_usd=daily, max_slippage_bps=slippage,
+                                   max_leverage=leverage, allowed_coins=sorted(coins) if coins else None,
+                                   policy_version=version, is_killed=existing.is_killed if existing else False)
+        try:
+            hl.check_account(policy)
+        except Refused as r:
+            raise HTTPException(422, r.details) from None
+        except MarketUnavailable as exc:
+            raise HTTPException(503, str(exc)) from None
+        if not hl.set_policy(policy, nonce):
+            raise HTTPException(409, "nonce already used: sign a new message with a higher nonce")
+        return {"ok": True, "policy": _hl_policy_json(policy)}
+
+    @app.get("/v1/hyperliquid/policy/{account}")
+    def get_hyperliquid_policy(account: str):
+        policy = hl.get_policy(_address(account, "account"))
+        if policy is None:
+            raise HTTPException(404, f"no policy for {account}")
+        return _hl_policy_json(policy)
+
+    def _hl_control(action: str, body: dict) -> HyperliquidPolicy:
+        account = _address(body.get("account"), "account").lower()
+        policy = hl.get_policy(account)
+        if policy is None:
+            raise HTTPException(404, f"no policy for {account}")
+        nonce = _int(body, "nonce")
+        caller = hl_control.signer_of(hl_control.action_message(action, account, nonce), str(body.get("signature", "")))
+        allowed = {policy.owner} | ({policy.guardian} if policy.guardian and action == "kill" else set())
+        if caller not in allowed:
+            raise HTTPException(403, f"{action} must be signed by the owner{' or the guardian' if action == 'kill' else ''}")
+        if not hl.set_killed(account, action == "kill", nonce):
+            raise HTTPException(409, "nonce already used: an old message can't be replayed")
+        return policy
+
+    @app.post("/v1/hyperliquid/kill")
+    def kill_hyperliquid(body: Annotated[dict, Body()]):
+        policy = _hl_control("kill", body)
+        return {"ok": True, "account": policy.account, "killed": True}
+
+    @app.post("/v1/hyperliquid/revive")
+    def revive_hyperliquid(body: Annotated[dict, Body()]):
+        policy = _hl_control("revive", body)
+        return {"ok": True, "account": policy.account, "killed": False}
+
+    @app.post("/v1/hyperliquid/check")
+    def hyperliquid_check(body: Annotated[dict, Body()]):
+        account = _address(body.get("account"), "account")
+        signer = _address(body.get("signer"), "signer")
+        signature = body.get("signature")
+        if not isinstance(signature, dict) or not {"r", "s", "v"} <= set(signature):
+            raise HTTPException(422, "signature must be {r, s, v}: the signer's own over the same multi-sig envelope")
+        v = hl.evaluate(account, body.get("action"), body.get("nonce"), body.get("expires_after"), signer, signature)
+        return {"approved": v.approved, "status": v.status, "violation_details": v.violation_details,
+                "account": v.account, "operations": v.operations, "cosigner_address": v.cosigner_address,
+                "cosigner_signature": v.cosigner_signature}
 
     return app

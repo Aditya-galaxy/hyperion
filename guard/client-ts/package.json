@@ -1,27 +1,57 @@
 {
   "name": "hyperion-guard-client",
   "version": "0.1.0",
-  "description": "TypeScript client for the Hyperion Guard on Solana: build Guarded Vault instructions, ask the Guard, attach its co-signature.",
+  "description": "TypeScript client for the Hyperion Guard on Solana: build Guarded Vault instructions, ask the Guard, attach its co-signature. With a Solana Agent Kit plugin.",
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=22.18" },
+  "engines": {
+    "node": ">=22.18"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-  "files": ["dist", "src", "README.md"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./agent-kit": {
+      "types": "./dist/agent-kit.d.ts",
+      "default": "./dist/agent-kit.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
-    "demo": "node examples/devnet.ts"
+    "demo": "node examples/devnet.ts",
+    "demo:agent-kit": "node examples/agent-kit.ts"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.0",
     "bs58": "^6.0.0",
     "tweetnacl": "^1.0.3"
   },
+  "peerDependencies": {
+    "solana-agent-kit": "^2.0.0",
+    "zod": "^3.24.0"
+  },
+  "peerDependenciesMeta": {
+    "solana-agent-kit": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "typescript": "^5.7.0"
+    "solana-agent-kit": "^2.0.10",
+    "typescript": "^5.7.0",
+    "zod": "^3.25.76"
   }
 }

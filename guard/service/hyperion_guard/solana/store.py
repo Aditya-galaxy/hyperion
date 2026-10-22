@@ -37,7 +37,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Protocol
 
-KINDS = ("policy", "nonce", "usage", "approved")
+KINDS = ("policy", "nonce", "usage", "approved",
+         "hl_policy", "hl_nonce", "hl_usage", "hl_approved")          # the Hyperliquid Guard's: see hyperliquid/guard.py
 
 
 class StateStore(Protocol):
