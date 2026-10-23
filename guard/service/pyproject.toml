@@ -20,3 +20,6 @@ hyperion-guard = "hyperion_guard.cli:main"
 
 [tool.setuptools]
 packages = ["hyperion_guard", "hyperion_guard.solana", "hyperion_guard.hyperliquid", "hyperion_guard.payments"]
+
+[tool.setuptools.package-data]
+hyperion_guard = ["console.html"]
