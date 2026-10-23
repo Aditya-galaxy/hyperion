@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guard Console</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #14171c; --muted: #5d6673; --line: #e2e5ea;
+  --accent: #3b5bdb; --ok: #1f8a4c; --ok-bg: #e6f4ec; --bad: #c92a2a; --bad-bg: #fdecec; --warn: #a15c00;
+  --bar: #e9ecf1; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1216; --panel: #171b21; --ink: #e8ebef; --muted: #98a1ad; --line: #272d36;
+    --accent: #7c95f5; --ok: #4cc683; --ok-bg: #14271d; --bad: #ff6b6b; --bad-bg: #2d1616; --warn: #f0a640; --bar: #232932;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1216; --panel: #171b21; --ink: #e8ebef; --muted: #98a1ad; --line: #272d36;
+  --accent: #7c95f5; --ok: #4cc683; --ok-bg: #14271d; --bad: #ff6b6b; --bad-bg: #2d1616; --warn: #f0a640; --bar: #232932;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 20px; }
+h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+.sub { color: var(--muted); font-size: 13px; }
+.mono { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+input { flex: 1 1 320px; min-width: 0; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: 14px var(--mono); }
+button { padding: 9px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+button:disabled { opacity: 0.5; cursor: default; }
+.status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; font-weight: 700; font-size: 14px; }
+.badge.live { background: var(--ok-bg); color: var(--ok); }
+.badge.killed { background: var(--bad-bg); color: var(--bad); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+.kv dt { color: var(--muted); font-size: 12px; margin-top: 10px; }
+.kv dd { margin: 2px 0 0; }
+.meter { margin: 10px 0 4px; }
+.meter .label { display: flex; justify-content: space-between; font-size: 13px; gap: 8px; }
+.meter .track { height: 8px; background: var(--bar); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+.meter .fill { height: 100%; background: var(--accent); border-radius: 4px; }
+.meter .fill.high { background: var(--warn); }
+.meter .fill.full { background: var(--bad); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.scroll { overflow-x: auto; }
+.empty { color: var(--muted); padding: 12px 0; }
+.msg { margin-top: 12px; font-size: 14px; }
+.msg.err { color: var(--bad); }
+.msg.ok { color: var(--ok); }
+pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow-x: auto; font: 12px/1.5 var(--mono); margin: 8px 0 0; white-space: pre-wrap; word-break: break-all; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 12px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Hyperion Guard · Console</h1>
+      <div class="sub">An agent's payout limits, spend and kill switch</div>
+    </div>
+    <div class="sub">Approvals signed by <span class="mono" id="cosigner">…</span></div>
+  </header>
+
+  <section class="panel">
+    <h2>Agent</h2>
+    <form class="row" id="pick">
+      <input id="agent" placeholder="0x… the agent's request key" autocomplete="off" spellcheck="false" aria-label="Agent address">
+      <button class="primary" type="submit">Open</button>
+    </form>
+    <div class="msg err" id="pick-error" hidden></div>
+  </section>
+
+  <div id="view" hidden>
+    <section class="panel">
+      <div class="status">
+        <span class="badge" id="badge"><span class="dot"></span><span id="badge-text"></span></span>
+        <span class="sub" id="status-line"></span>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button class="danger" id="kill">Kill: stop every payout</button>
+        <button id="revive">Revive</button>
+        <button id="connect">Connect wallet</button>
+      </div>
+      <div class="sub" id="wallet-line" style="margin-top:8px"></div>
+      <div class="msg" id="action-msg" hidden></div>
+      <details>
+        <summary>No wallet in this browser? Use the command line</summary>
+        <pre id="cli"></pre>
+      </details>
+    </section>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>Last 24 hours</h2>
+        <div id="meters"></div>
+      </section>
+      <section class="panel">
+        <h2>Policy <span id="version"></span></h2>
+        <dl class="kv" id="policy"></dl>
+      </section>
+    </div>
+
+    <section class="panel">
+      <h2>Approved payouts, last 24 hours</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>When</th><th>Recipient</th><th>Chain</th><th>Payout id</th><th class="num">USDC</th></tr></thead>
+        <tbody id="approvals"></tbody>
+      </table></div>
+      <div class="empty" id="no-approvals" hidden>No payouts approved in the last 24 hours.</div>
+    </section>
+  </div>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+  let agent = null, policy = null, account = null, timer = null;
+
+  const short = (a) => a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '—';
+  const store = {
+    get() { try { return localStorage.getItem('guard-console-agent'); } catch { return null; } },
+    set(v) { try { localStorage.setItem('guard-console-agent', v); } catch {} },
+  };
+
+  function el(tag, text, cls) {
+    const e = document.createElement(tag);
+    if (text !== undefined) e.textContent = text;
+    if (cls) e.className = cls;
+    return e;
+  }
+
+  async function api(path, body) {
+    const res = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {});
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+    return data;
+  }
+
+  function meter(label, spent, cap) {
+    const s = Number(spent), c = Number(cap), pct = c > 0 ? Math.min(100, (s / c) * 100) : 0;
+    const wrap = el('div', undefined, 'meter');
+    const head = el('div', undefined, 'label');
+    head.append(el('span', label), el('span', `$${spent} of $${cap}`, 'mono'));
+    const track = el('div', undefined, 'track');
+    const fill = el('div', undefined, 'fill' + (pct >= 100 ? ' full' : pct >= 75 ? ' high' : ''));
+    fill.style.width = `${pct}%`;
+    track.append(fill);
+    wrap.append(head, track);
+    return wrap;
+  }
+
+  function render(p, activity) {
+    policy = p;
+    const killed = p.killed;
+    $('badge').className = 'badge ' + (killed ? 'killed' : 'live');
+    $('badge-text').textContent = killed ? 'Killed: no payouts' : 'Live: payouts allowed';
+    $('status-line').textContent = killed ? 'The Guard refuses every payout until the owner revives it.'
+      : `Up to $${p.max_per_payment_usdc} a payment, within the caps below.`;
+    $('kill').disabled = killed;
+    $('revive').disabled = !killed;
+    $('version').textContent = `· v${p.policy_version}`;
+
+    const dl = $('policy');
+    dl.replaceChildren();
+    const add = (k, v, mono) => { dl.append(el('dt', k)); dl.append(el('dd', v, mono ? 'mono' : undefined)); };
+    add('Per payment', `$${p.max_per_payment_usdc}`);
+    add('Per day, all recipients', `$${p.daily_cap_usdc}`);
+    add('Per day, one recipient', `$${p.max_per_recipient_daily_usdc}`);
+    add('Pays from', p.payers.join('\n'), true);
+    add('Chains', p.chains.join(', '));
+    add('Tokens', p.tokens.join('\n'), true);
+    add('Owner', p.owner, true);
+    add('Guardian', p.guardian || 'none', true);
+
+    const meters = $('meters');
+    meters.replaceChildren(meter('All recipients', activity.spent_24h_usdc, p.daily_cap_usdc));
+    const top = Object.entries(activity.by_recipient_24h_usdc).slice(0, 5);
+    for (const [r, amount] of top) meters.append(meter(`To ${short(r)}`, amount, p.max_per_recipient_daily_usdc));
+    if (!top.length) meters.append(el('div', 'Nothing approved yet today.', 'empty'));
+
+    const body = $('approvals');
+    body.replaceChildren();
+    for (const a of activity.approvals) {
+      const tr = el('tr');
+      const when = new Date(a.at * 1000);
+      tr.append(el('td', when.toLocaleString(), 'mono'), el('td', a.recipient, 'mono'), el('td', a.chain ?? '—'),
+                el('td', a.intent_id ?? '—', 'mono'), el('td', a.amount_usdc, 'num mono'));
+      body.append(tr);
+    }
+    $('no-approvals').hidden = activity.approvals.length > 0;
+
+    const action = killed ? 'revive' : 'kill';
+    $('cli').textContent = `cd guard/service && .venv/bin/python -m hyperion_guard.payments.owner ${action} \\\n` +
+      `  --key-file ~/.hyperion/owner.key --agent ${p.agent}`;
+    renderWallet();
+  }
+
+  function renderWallet() {
+    if (!window.ethereum) { $('connect').hidden = true; $('wallet-line').textContent = 'No browser wallet found: use the command line below.'; return; }
+    if (!account) { $('wallet-line').textContent = 'Connect the owner\'s (or guardian\'s) wallet to sign.'; return; }
+    const a = account.toLowerCase();
+    const role = policy && a === policy.owner ? 'owner' : policy && policy.guardian && a === policy.guardian ? 'guardian' : null;
+    $('connect').hidden = true;
+    $('wallet-line').textContent = role ? `Signing as the ${role}, ${short(account)}.`
+      : `Connected ${short(account)}, which is neither the owner nor the guardian: the Guard will refuse its signature.`;
+  }
+
+  async function load() {
+    try {
+      const [p, activity] = await Promise.all([api(`/v1/payments/policy/${agent}`), api(`/v1/payments/activity/${agent}`)]);
+      $('pick-error').hidden = true;
+      $('view').hidden = false;
+      render(p, activity);
+    } catch (e) {
+      $('view').hidden = true;
+      $('pick-error').hidden = false;
+      $('pick-error').textContent = e.message;
+    }
+  }
+
+  function open(value) {
+    value = value.trim();
+    if (!ADDRESS.test(value)) { $('pick-error').hidden = false; $('pick-error').textContent = 'That isn\'t a 0x address.'; return; }
+    agent = value.toLowerCase();
+    $('agent').value = value;
+    store.set(value);
+    const url = new URL(location.href);
+    url.searchParams.set('agent', value);
+    history.replaceState(null, '', url);
+    clearInterval(timer);
+    load();
+    timer = setInterval(load, 15000);
+  }
+
+  function say(text, ok) {
+    const m = $('action-msg');
+    m.hidden = false;
+    m.className = 'msg ' + (ok ? 'ok' : 'err');
+    m.textContent = text;
+  }
+
+  async function connect() {
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    account = accounts[0];
+    renderWallet();
+  }
+
+  async function act(action) {
+    try {
+      if (!window.ethereum) { say('No browser wallet: run the command below instead.'); return; }
+      if (!account) await connect();
+      const nonce = Date.now();
+      // exactly what the Guard checks: hyperion_guard/payments/control.py, action_message
+      const message = `hyperion-guard/payments/${action}/v1:${agent}:${nonce}`;
+      const hex = '0x' + Array.from(new TextEncoder().encode(message), (b) => b.toString(16).padStart(2, '0')).join('');
+      const signature = await window.ethereum.request({ method: 'personal_sign', params: [hex, account] });
+      await api(`/v1/payments/${action}`, { agent, nonce, signature });
+      say(action === 'kill' ? 'Killed. The Guard now refuses every payout.' : 'Revived. Payouts are allowed again, within the caps.', true);
+      load();
+    } catch (e) {
+      say(e.message || String(e));
+    }
+  }
+
+  $('pick').addEventListener('submit', (e) => { e.preventDefault(); open($('agent').value); });
+  $('kill').addEventListener('click', () => {
+    if (confirm('Stop every payout this agent makes, until the owner revives it?')) act('kill');
+  });
+  $('revive').addEventListener('click', () => act('revive'));
+  $('connect').addEventListener('click', () => connect().catch((e) => say(e.message || String(e))));
+  if (window.ethereum) window.ethereum.on?.('accountsChanged', (a) => { account = a[0] ?? null; renderWallet(); });
+
+  fetch('/v1/payments/health').then((r) => r.json()).then((h) => { $('cosigner').textContent = h.cosigner_address; }).catch(() => {});
+  const initial = new URLSearchParams(location.search).get('agent') || store.get();
+  if (initial) open(initial);
+})();
+</script>
+</body>
+</html>

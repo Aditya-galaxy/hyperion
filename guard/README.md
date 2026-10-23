@@ -187,7 +187,15 @@ pays its creators this way (`src/campaign/hyperion.ts`). The encoding is
 pinned by [`payments_vector.json`](service/tests/fixtures/payments_vector.json),
 which both sides test against.
 
-The owner's controls:
+**The owner's console** is at [`/console`](https://hyperion-guard-dijsyl2kwq-uc.a.run.app/console) on any Guard. It shows:
+
+- the policy, and whether payouts are live or killed;
+- the last 24 hours' spend against each cap;
+- every approved payout in that time.
+
+Its kill and revive buttons sign with the browser's wallet; the page never handles a private key. Without a wallet, it shows the command to run instead.
+
+The owner's controls from a terminal:
 
 ```bash
 python -m hyperion_guard.payments.owner new-key ~/.hyperion/owner.key

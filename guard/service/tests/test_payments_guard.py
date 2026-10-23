@@ -181,3 +181,18 @@ def test_the_owner_command_line(tmp_path, clock, monkeypatch, capsys):
     time.sleep(0.002)
     cli.main(["--guard", "https://g", "revive", "--key-file", str(key), "--agent", AGENT.address])
     assert ask(c)["approved"]
+
+
+def test_activity_and_the_console(client):
+    assert ask(client, amount="10", intent="pay-a")["approved"]
+    assert ask(client, amount="2.5", intent="pay-b", recipient=BOB)["approved"]
+    a = client.get(f"/v1/payments/activity/{AGENT.address}").json()
+    assert (a["spent_24h_usdc"], a["remaining_24h_usdc"]) == ("12.50", "12.50")
+    assert a["by_recipient_24h_usdc"] == {ALICE: "10.00", BOB: "2.50"}
+    assert [(x["intent_id"], x["amount_usdc"], x["chain"]) for x in a["approvals"]] == [("pay-b", "2.50", "base"),
+                                                                                       ("pay-a", "10.00", "base")]
+    assert client.get(f"/v1/payments/activity/{GUARDIAN.address}").status_code == 404
+    page = client.get("/console")
+    assert page.status_code == 200 and "Guard Console" in page.text
+    assert "connect-src 'self'" in page.headers["content-security-policy"]
+    assert "innerHTML" not in page.text                                     # data goes in as text, never as markup

@@ -131,7 +131,7 @@ class PaymentGuardEngine:
 
     def _recent(self, agent: str) -> list[list]:
         since = self.clock() - DAY_S
-        return [p for p in self.usage.get(agent, []) if p[0] > since]      # [time, recipient, units]
+        return [p for p in self.usage.get(agent, []) if p[0] > since]      # [time, recipient, units, intent, chain]
 
     def check(self, *, agent: str, payer: str, recipient: str, token: str, chain: str, amount: str, intent_id: str,
               expires_at: int, simulate: bool, signature: str) -> PaymentVerdict:
@@ -168,7 +168,7 @@ class PaymentGuardEngine:
                 self.store.put_many([("pay_approved", key, {**saved, "approval": typed, "signature": signed})])
                 return PaymentVerdict(True, "APPROVED", None, agent, typed, signed, self.address)
             signed = control.sign_approval(self.account.key, typed)
-            payouts = self._recent(agent) + [[self.clock(), recipient.lower(), units]]
+            payouts = self._recent(agent) + [[self.clock(), recipient.lower(), units, intent_id, chain]]
             self.store.put_many([
                 ("pay_approved", key, {"payout": [payer.lower(), recipient.lower(), token.lower(), chain, units],
                                        "approval": typed, "signature": signed}),
@@ -176,6 +176,29 @@ class PaymentGuardEngine:
             ])
             self.usage[agent] = payouts
             return PaymentVerdict(True, "APPROVED", None, agent, typed, signed, self.address)
+
+    def activity(self, agent: str) -> dict:
+        """The last 24 hours: what was approved, and what's left under each cap."""
+        agent = agent.lower()
+        with self.lock:
+            policy = self.policies.get(agent)
+            if policy is None:
+                return {}
+            recent = self._recent(agent)
+        spent = sum(p[2] for p in recent)
+        daily = amount_units(policy.daily_cap_usdc)
+        by_recipient: dict[str, int] = {}
+        for p in recent:
+            by_recipient[p[1]] = by_recipient.get(p[1], 0) + p[2]
+        usd = lambda units: f"{Decimal(units) / UNITS:.2f}"  # noqa: E731
+        return {
+            "spent_24h_usdc": usd(spent), "remaining_24h_usdc": usd(max(0, daily - spent)),
+            "by_recipient_24h_usdc": {r: usd(u) for r, u in sorted(by_recipient.items(), key=lambda kv: -kv[1])},
+            # newest first; entries from before intents were recorded have none
+            "approvals": [{"at": int(p[0]), "recipient": p[1], "amount_usdc": usd(p[2]),
+                           "intent_id": p[3] if len(p) > 3 else None, "chain": p[4] if len(p) > 4 else None}
+                          for p in reversed(recent)],
+        }
 
     def _judge(self, policy: PaymentPolicy, payer: str, recipient: str, token: str, chain: str, amount: str,
                intent_id: str, expires_at: int) -> int:

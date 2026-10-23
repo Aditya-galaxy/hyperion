@@ -23,11 +23,12 @@ import binascii
 import math
 import os
 import re
+from pathlib import Path
 from typing import Annotated
 
 from eth_account import Account
 from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from .engine import ExecutorCall, Guard, GuardUnavailable, parse_order
 from .hyperliquid import control as hl_control
@@ -45,6 +46,10 @@ from .solana.store import store_from_env
 from .solana.vault import register_vault_program
 
 ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
+# The owner's console: one self-contained page, talking only to this Guard and the browser's wallet.
+CONSOLE = Path(__file__).with_name("console.html")
+CONSOLE_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; "
+               "img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 HEX = re.compile(r"^0x([0-9a-fA-F]{2})*$")
 
 
@@ -580,6 +585,18 @@ def create_app(guard: Guard | None = None, solana_guard: SolanaGuardEngine | Non
         if policy is None:
             raise HTTPException(404, f"no policy for {agent}")
         return _pay_policy_json(policy)
+
+    @app.get("/v1/payments/activity/{agent}")
+    def payments_activity(agent: str):
+        activity = pay.activity(_address(agent, "agent"))
+        if not activity:
+            raise HTTPException(404, f"no policy for {agent}")
+        return activity
+
+    @app.get("/console", response_class=HTMLResponse, include_in_schema=False)
+    def console():
+        return HTMLResponse(CONSOLE.read_text(), headers={"cache-control": "no-cache",
+                                                          "content-security-policy": CONSOLE_CSP})
 
     def _pay_control(action: str, body: dict) -> PaymentPolicy:
         agent = _address(body.get("agent"), "agent").lower()
