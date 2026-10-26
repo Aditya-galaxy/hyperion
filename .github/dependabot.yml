@@ -1,0 +1,18 @@
+# Dependabot opens dependency-update PRs. On this repository they are also
+# the agent PRs that Tenure (github.com/Aditya-galaxy/tenure) decides on:
+# held for review until a maintainer grants it a class of change, merged by
+# Tenure after that, and the grant withdrawn if a merge is reverted.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 3
+  - package-ecosystem: cargo
+    directory: /
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 3
+  - package-ecosystem: pip
+    directory: /python
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 2
