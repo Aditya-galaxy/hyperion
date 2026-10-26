@@ -16,7 +16,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Rust toolchain
       uses: dtolnay/rust-toolchain@stable
@@ -50,7 +50,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -72,7 +72,7 @@ jobs:
 
     steps:
     - name: Checkout repository (with contract libraries)
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         submodules: recursive
 
@@ -93,7 +93,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -113,7 +113,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -136,7 +136,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     # rust-toolchain.toml in this folder selects the host toolchain the tests need.
     - name: Cache cargo, the SBF platform tools and the build
@@ -181,7 +181,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     # Node runs the TypeScript tests directly (type stripping), so no build step.
     - name: Set up Node
