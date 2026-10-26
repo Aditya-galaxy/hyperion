@@ -22,7 +22,7 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
 
     - name: Cargo Cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/bin/
@@ -140,7 +140,7 @@ jobs:
 
     # rust-toolchain.toml in this folder selects the host toolchain the tests need.
     - name: Cache cargo, the SBF platform tools and the build
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/bin/
